@@ -7,6 +7,7 @@
 #include "ship/controller/controldevice/controller/mapping/mouse/MouseWheelToButtonMapping.h"
 #include "ship/controller/controldevice/controller/mapping/sdl/SDLButtonToButtonMapping.h"
 #include "ship/controller/controldevice/controller/mapping/sdl/SDLAxisDirectionToButtonMapping.h"
+#include "ship/controller/controldevice/controller/mapping/sdl/SDLTouchpadZoneToButtonMapping.h"
 #include "ship/controller/controldevice/controller/mapping/keyboard/KeyboardScancodes.h"
 #include "ship/controller/controldevice/controller/mapping/mouse/WheelHandler.h"
 #include "ship/controller/controldeck/ControlDeck.h"
@@ -54,6 +55,28 @@ std::shared_ptr<ControllerButtonMapping> ButtonMappingFactory::CreateButtonMappi
         }
 
         return std::make_shared<SDLAxisDirectionToButtonMapping>(portIndex, bitmask, sdlControllerAxis, axisDirection);
+    }
+
+    if (mappingClass == "SDLTouchpadZoneToButtonMapping") {
+        int32_t touchpadIndex = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(
+            StringHelper::Sprintf("%s.TouchpadIndex", mappingCvarKey.c_str()).c_str(), -1);
+        float xMin = Ship::Context::GetInstance()->GetConsoleVariables()->GetFloat(
+            StringHelper::Sprintf("%s.XMin", mappingCvarKey.c_str()).c_str(), 0.0f);
+        float xMax = Ship::Context::GetInstance()->GetConsoleVariables()->GetFloat(
+            StringHelper::Sprintf("%s.XMax", mappingCvarKey.c_str()).c_str(), 0.0f);
+        float yMin = Ship::Context::GetInstance()->GetConsoleVariables()->GetFloat(
+            StringHelper::Sprintf("%s.YMin", mappingCvarKey.c_str()).c_str(), 0.0f);
+        float yMax = Ship::Context::GetInstance()->GetConsoleVariables()->GetFloat(
+            StringHelper::Sprintf("%s.YMax", mappingCvarKey.c_str()).c_str(), 0.0f);
+
+        if (touchpadIndex < 0 || touchpadIndex > 1 || xMax <= xMin || yMax <= yMin) {
+            Ship::Context::GetInstance()->GetConsoleVariables()->ClearVariable(mappingCvarKey.c_str());
+            Ship::Context::GetInstance()->GetConsoleVariables()->Save();
+            return nullptr;
+        }
+
+        return std::make_shared<SDLTouchpadZoneToButtonMapping>(portIndex, bitmask, touchpadIndex, xMin, xMax, yMin,
+                                                                yMax);
     }
 
     if (mappingClass == "KeyboardKeyToButtonMapping") {
