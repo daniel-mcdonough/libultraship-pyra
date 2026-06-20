@@ -5,6 +5,7 @@
 
 #include "ship/controller/controldevice/controller/mapping/sdl/SDLButtonToAxisDirectionMapping.h"
 #include "ship/controller/controldevice/controller/mapping/sdl/SDLAxisDirectionToAxisDirectionMapping.h"
+#include "ship/controller/controldevice/controller/mapping/sdl/SDLTouchpadToAxisDirectionMapping.h"
 
 #include "ship/config/ConsoleVariable.h"
 #include "ship/utils/StringHelper.h"
@@ -41,6 +42,33 @@ AxisDirectionMappingFactory::CreateAxisDirectionMappingFromConfig(uint8_t portIn
 
         return std::make_shared<SDLAxisDirectionToAxisDirectionMapping>(
             portIndex, stickIndex, static_cast<Direction>(direction), sdlControllerAxis, axisDirection);
+    }
+
+    if (mappingClass == "SDLTouchpadToAxisDirectionMapping") {
+        int32_t direction = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(
+            StringHelper::Sprintf("%s.Direction", mappingCvarKey.c_str()).c_str(), -1);
+        int32_t touchpadIndex = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(
+            StringHelper::Sprintf("%s.TouchpadIndex", mappingCvarKey.c_str()).c_str(), -1);
+        int32_t axis = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(
+            StringHelper::Sprintf("%s.Axis", mappingCvarKey.c_str()).c_str(), -1);
+        int32_t axisDirection = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(
+            StringHelper::Sprintf("%s.AxisDirection", mappingCvarKey.c_str()).c_str(), 0);
+        float deadzone = Ship::Context::GetInstance()->GetConsoleVariables()->GetFloat(
+            StringHelper::Sprintf("%s.Deadzone", mappingCvarKey.c_str()).c_str(), 0.15f);
+        float sensitivity = Ship::Context::GetInstance()->GetConsoleVariables()->GetFloat(
+            StringHelper::Sprintf("%s.Sensitivity", mappingCvarKey.c_str()).c_str(), 1.0f);
+
+        if ((direction != LEFT && direction != RIGHT && direction != UP && direction != DOWN) ||
+            touchpadIndex < 0 || touchpadIndex > 1 || (axis != X && axis != Y) ||
+            (axisDirection != NEGATIVE && axisDirection != POSITIVE)) {
+            Ship::Context::GetInstance()->GetConsoleVariables()->ClearVariable(mappingCvarKey.c_str());
+            Ship::Context::GetInstance()->GetConsoleVariables()->Save();
+            return nullptr;
+        }
+
+        return std::make_shared<SDLTouchpadToAxisDirectionMapping>(portIndex, stickIndex,
+                                                                   static_cast<Direction>(direction), touchpadIndex,
+                                                                   axis, axisDirection, deadzone, sensitivity);
     }
 
     if (mappingClass == "SDLButtonToAxisDirectionMapping") {

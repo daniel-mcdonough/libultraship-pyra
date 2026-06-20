@@ -8,6 +8,7 @@
 #include "ship/controller/controldevice/controller/mapping/sdl/SDLButtonToButtonMapping.h"
 #include "ship/controller/controldevice/controller/mapping/sdl/SDLAxisDirectionToButtonMapping.h"
 #include "ship/controller/controldevice/controller/mapping/sdl/SDLTouchpadZoneToButtonMapping.h"
+#include "ship/controller/controldevice/controller/mapping/sdl/SDLTouchpadWedgeToButtonMapping.h"
 #include "ship/controller/controldevice/controller/mapping/keyboard/KeyboardScancodes.h"
 #include "ship/controller/controldevice/controller/mapping/mouse/WheelHandler.h"
 #include "ship/controller/controldeck/ControlDeck.h"
@@ -77,6 +78,27 @@ std::shared_ptr<ControllerButtonMapping> ButtonMappingFactory::CreateButtonMappi
 
         return std::make_shared<SDLTouchpadZoneToButtonMapping>(portIndex, bitmask, touchpadIndex, xMin, xMax, yMin,
                                                                 yMax);
+    }
+
+    if (mappingClass == "SDLTouchpadWedgeToButtonMapping") {
+        int32_t touchpadIndex = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(
+            StringHelper::Sprintf("%s.TouchpadIndex", mappingCvarKey.c_str()).c_str(), -1);
+        float startAngle = Ship::Context::GetInstance()->GetConsoleVariables()->GetFloat(
+            StringHelper::Sprintf("%s.StartAngle", mappingCvarKey.c_str()).c_str(), -1.0f);
+        float endAngle = Ship::Context::GetInstance()->GetConsoleVariables()->GetFloat(
+            StringHelper::Sprintf("%s.EndAngle", mappingCvarKey.c_str()).c_str(), -1.0f);
+        float innerRadius = Ship::Context::GetInstance()->GetConsoleVariables()->GetFloat(
+            StringHelper::Sprintf("%s.InnerRadius", mappingCvarKey.c_str()).c_str(), 0.1f);
+
+        if (touchpadIndex < 0 || touchpadIndex > 1 || startAngle < 0.0f || endAngle < 0.0f ||
+            innerRadius < 0.0f || innerRadius > 0.95f) {
+            Ship::Context::GetInstance()->GetConsoleVariables()->ClearVariable(mappingCvarKey.c_str());
+            Ship::Context::GetInstance()->GetConsoleVariables()->Save();
+            return nullptr;
+        }
+
+        return std::make_shared<SDLTouchpadWedgeToButtonMapping>(portIndex, bitmask, touchpadIndex, startAngle,
+                                                                 endAngle, innerRadius);
     }
 
     if (mappingClass == "KeyboardKeyToButtonMapping") {

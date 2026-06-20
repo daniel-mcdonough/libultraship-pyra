@@ -31,6 +31,12 @@ class SDLTouchpadZoneToButtonMapping final : public ControllerButtonMapping {
     std::string GetPhysicalDeviceName() override;
     std::string GetPhysicalInputName() override;
 
+    int32_t GetTouchpadIndex() const { return mTouchpadIndex; }
+    float GetXMin() const { return mXMin; }
+    float GetXMax() const { return mXMax; }
+    float GetYMin() const { return mYMin; }
+    float GetYMax() const { return mYMax; }
+
   private:
     int32_t mTouchpadIndex;
     float mXMin;
