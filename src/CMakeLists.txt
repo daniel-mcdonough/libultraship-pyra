@@ -7,7 +7,14 @@ set_property(TARGET libultraship PROPERTY CXX_STANDARD 20)
 set_property(TARGET libultraship PROPERTY C_STANDARD 11)
 
 set(INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+# USE_OPENGLES / USE_OPENGLES2 are declared in the top-level CMakeLists so the
+# dependency scripts can see them; repeated here only for standalone builds of
+# this directory.
 option(USE_OPENGLES "Enable GLES3" OFF)
+option(USE_OPENGLES2 "Enable GLES2 (GLSL ES 1.00); implies USE_OPENGLES" OFF)
+if (USE_OPENGLES2)
+    set(USE_OPENGLES ON CACHE BOOL "Enable GLES3" FORCE)
+endif()
 option(GFX_DEBUG_DISASSEMBLER "Enable libgfxd" OFF)
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -96,13 +103,22 @@ endif()
 
 if (USE_OPENGLES)
     if (CMAKE_SYSTEM_NAME STREQUAL "Android")
-        find_library(OPENGLES_LIBRARY GLESv3)
-        target_link_libraries(libultraship PRIVATE GLESv3)
+        if (USE_OPENGLES2)
+            find_library(OPENGLES_LIBRARY GLESv2)
+        else()
+            find_library(OPENGLES_LIBRARY GLESv3)
+        endif()
+        target_link_libraries(libultraship PRIVATE ${OPENGLES_LIBRARY})
     elseif(CMAKE_SYSTEM_NAME STREQUAL "OpenBSD")
         target_link_libraries(libultraship PRIVATE OpenGL::GLES2)
     else()
+        # Link the located library rather than the bare name. Vendor drivers do
+        # not always use the SONAME the linker would pick by name: the PowerVR
+        # SGX DDK ships libGLESv2.so.1 while libglvnd provides libGLESv2.so.2,
+        # and linking the wrong one builds fine but fails at runtime. Presetting
+        # OPENGLES_LIBRARY in the cache selects a specific driver.
         find_library(OPENGLES_LIBRARY GLESv2)
-        target_link_libraries(libultraship PRIVATE GLESv2)
+        target_link_libraries(libultraship PRIVATE ${OPENGLES_LIBRARY})
     endif()
 endif()
 
@@ -177,6 +193,7 @@ else()
         $<$<NOT:$<CONFIG:Debug>>:NDEBUG>
         SPDLOG_ACTIVE_LEVEL=${SPDLOG_MIN_CUTOFF}
         $<$<BOOL:${USE_OPENGLES}>:USE_OPENGLES>
+        $<$<BOOL:${USE_OPENGLES2}>:USE_OPENGLES2>
         $<$<BOOL:${GFX_DEBUG_DISASSEMBLER}>:GFX_DEBUG_DISASSEMBLER>
     )
 endif()

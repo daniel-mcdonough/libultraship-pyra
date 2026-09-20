@@ -27,6 +27,14 @@ set(ADDITIONAL_LIB_INCLUDES "")
 option(INCLUDE_MPQ_SUPPORT "Enable StormLib and MPQ archive support" OFF)
 option(GBI_UCODE "Specify the GBI ucode version" F3DEX_GBI_2)
 
+# Declared here rather than in src/, because the per-platform dependency
+# scripts included below branch on USE_OPENGLES to pick ImGui's GL backend.
+option(USE_OPENGLES "Enable GLES3" OFF)
+option(USE_OPENGLES2 "Enable GLES2 (GLSL ES 1.00); implies USE_OPENGLES" OFF)
+if (USE_OPENGLES2)
+    set(USE_OPENGLES ON CACHE BOOL "Enable GLES3" FORCE)
+endif()
+
 # =========== Dependencies =============
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
     include(cmake/dependencies/windows-vcpkg.cmake)
