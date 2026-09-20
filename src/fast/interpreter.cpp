@@ -4389,6 +4389,11 @@ void Interpreter::RunGuiOnly() {
     mGfxFrameBuffer = 0;
 
     if (mRendersToFb) {
+        // The game is finished with the framebuffer it has been drawing into; only its colour is
+        // used from here on, as the texture handed to the GUI below. Depth is dead, and every
+        // framebuffer has its depth cleared when it is next bound (see StartFrame and
+        // SetFrameBuffer), so nothing can observe the discarded contents.
+        mRapi->DiscardDepthStencil();
         mRapi->StartDrawToFramebuffer(0, 1);
         mRapi->ClearFramebuffer(true, true);
         if (mMsaaLevel > 1) {
@@ -4454,6 +4459,11 @@ void Interpreter::Run(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtx_r
     currentDir = std::stack<std::string>();
 
     if (mRendersToFb) {
+        // The game is finished with the framebuffer it has been drawing into; only its colour is
+        // used from here on, as the texture handed to the GUI below. Depth is dead, and every
+        // framebuffer has its depth cleared when it is next bound (see StartFrame and
+        // SetFrameBuffer), so nothing can observe the discarded contents.
+        mRapi->DiscardDepthStencil();
         mRapi->StartDrawToFramebuffer(0, 1);
         mRapi->ClearFramebuffer(true, true);
         if (mMsaaLevel > 1) {

@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <map>
 #include <unordered_map>
@@ -55,6 +56,45 @@ static void AttachDepthStencil(GLuint rbo) {
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo);
 #endif
 }
+
+#ifdef USE_OPENGLES2
+// GL_EXT_discard_framebuffer. A tile-based deferred renderer resolves the depth/stencil buffer
+// out to main memory at the end of every render pass unless it is told the contents are dead.
+// Nothing in Fast3D ever reads depth back, so that writeback is pure waste on such a GPU.
+//
+// The entry point must be resolved at runtime. GLES does not require extension functions to be
+// exported, and the PowerVR SGX DDK in particular exports only the core GLES 2.0 symbols and no
+// EXT/OES entry points at all, so linking against the name directly would fail to link.
+#ifndef GL_COLOR_EXT
+#define GL_COLOR_EXT 0x1800
+#endif
+#ifndef GL_DEPTH_EXT
+#define GL_DEPTH_EXT 0x1801
+#endif
+#ifndef GL_STENCIL_EXT
+#define GL_STENCIL_EXT 0x1802
+#endif
+
+typedef void(GL_APIENTRYP SohPfnDiscardFramebufferEXT)(GLenum target, GLsizei numAttachments,
+                                                       const GLenum* attachments);
+static SohPfnDiscardFramebufferEXT sDiscardFramebufferEXT = nullptr;
+
+// glGetString(GL_EXTENSIONS) is one space-delimited string in GLES 2.0 (glGetStringi is ES 3.0).
+// Match whole tokens so that a name is not mistaken for the prefix of a longer one.
+static bool HasGLExtension(const char* name) {
+    const char* exts = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
+    if (exts == nullptr || name == nullptr) {
+        return false;
+    }
+    const size_t len = strlen(name);
+    for (const char* p = strstr(exts, name); p != nullptr; p = strstr(p + len, name)) {
+        if ((p == exts || p[-1] == ' ') && (p[len] == ' ' || p[len] == '\0')) {
+            return true;
+        }
+    }
+    return false;
+}
+#endif
 
 // Multisampled renderbuffers are not in GLES 2.0. mMaxMsaaLevel is pinned to 1
 // there, which makes every caller single-sampled; this only has to compile.
@@ -811,6 +851,12 @@ void GfxRenderingAPIOGL::Init() {
 #ifdef USE_OPENGLES2
     // Multisampled renderbuffers are not core in GLES 2.0.
     mMaxMsaaLevel = 1;
+
+    if (HasGLExtension("GL_EXT_discard_framebuffer")) {
+        sDiscardFramebufferEXT =
+            reinterpret_cast<SohPfnDiscardFramebufferEXT>(SDL_GL_GetProcAddress("glDiscardFramebufferEXT"));
+    }
+    SPDLOG_INFO("GL_EXT_discard_framebuffer: {}", sDiscardFramebufferEXT != nullptr ? "in use" : "unavailable");
 #else
     glGetIntegerv(GL_MAX_SAMPLES, &mMaxMsaaLevel);
 #endif
@@ -823,7 +869,29 @@ void GfxRenderingAPIOGL::StartFrame() {
     mFrameCount++;
 }
 
+void GfxRenderingAPIOGL::DiscardDepthStencil() {
+#ifdef USE_OPENGLES2
+    if (sDiscardFramebufferEXT == nullptr) {
+        return;
+    }
+
+    // The attachment tokens differ between the default framebuffer and a framebuffer object, and
+    // passing the wrong set raises GL_INVALID_ENUM rather than being ignored. mCurrentFrameBuffer
+    // is an index into mFrameBuffers, where entry 0 is the default framebuffer (fbo name 0).
+    if (mCurrentFrameBuffer == 0) {
+        const GLenum attachments[] = { GL_DEPTH_EXT, GL_STENCIL_EXT };
+        sDiscardFramebufferEXT(GL_FRAMEBUFFER, 2, attachments);
+    } else {
+        const GLenum attachments[] = { GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
+        sDiscardFramebufferEXT(GL_FRAMEBUFFER, 2, attachments);
+    }
+#endif
+}
+
 void GfxRenderingAPIOGL::EndFrame() {
+    // The frame is finished and the buffer swap is next, so the default framebuffer's depth and
+    // stencil are dead. Colour is left alone - it is what gets presented.
+    DiscardDepthStencil();
     glFlush();
 }
 
