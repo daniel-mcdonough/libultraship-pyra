@@ -67,6 +67,12 @@ class GfxRenderingAPI {
         // (e.g. OpenGL) should override for a more precise partial clear.
         ClearFramebuffer(false, true);
     }
+    // Signals that the depth/stencil contents of the currently bound framebuffer will not be read
+    // again. A tile-based deferred renderer otherwise has to resolve them out to main memory at the
+    // end of every render pass. Immediate-mode backends gain nothing from this, so it defaults to a
+    // no-op rather than being pure virtual.
+    virtual void DiscardDepthStencil() {
+    }
     virtual void ReadFramebufferToCPU(int fbId, uint32_t width, uint32_t height, uint16_t* rgba16Buf) = 0;
     virtual void ResolveMSAAColorBuffer(int fbIdTarger, int fbIdSrc) = 0;
     virtual std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff>
