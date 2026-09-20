@@ -688,6 +688,38 @@ void GfxWindowBackendSDL2::SyncFramerateWithTime() const {
     previous_time = t;
 }
 
+// Frame-rate reporting for performance work on constrained hardware. Off unless
+// LUS_FPS_LOG is set to a reporting interval in seconds, so it costs one integer
+// compare per frame otherwise.
+static void ReportFrameRate() {
+    static int sIntervalSec = -1;
+    if (sIntervalSec < 0) {
+        const char* env = SDL_getenv("LUS_FPS_LOG");
+        sIntervalSec = env != nullptr ? SDL_atoi(env) : 0;
+    }
+    if (sIntervalSec <= 0) {
+        return;
+    }
+
+    static uint64_t sWindowStart = 0;
+    static uint32_t sFrames = 0;
+    const uint64_t now = SDL_GetPerformanceCounter();
+    const uint64_t freq = SDL_GetPerformanceFrequency();
+    if (sWindowStart == 0) {
+        sWindowStart = now;
+        return;
+    }
+
+    sFrames++;
+    const double elapsed = (double)(now - sWindowStart) / (double)freq;
+    if (elapsed >= (double)sIntervalSec) {
+        SPDLOG_INFO("FPS {:.2f} ({} frames in {:.2f}s, {:.2f} ms/frame)", sFrames / elapsed, sFrames, elapsed,
+                    1000.0 * elapsed / sFrames);
+        sWindowStart = now;
+        sFrames = 0;
+    }
+}
+
 void GfxWindowBackendSDL2::SwapBuffersBegin() {
     bool nextVsyncEnabled = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(CVAR_VSYNC_ENABLED, 1);
 
@@ -699,6 +731,7 @@ void GfxWindowBackendSDL2::SwapBuffersBegin() {
 
     SyncFramerateWithTime();
     SDL_GL_SwapWindow(mWnd);
+    ReportFrameRate();
 }
 
 void GfxWindowBackendSDL2::SwapBuffersEnd() {
