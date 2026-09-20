@@ -27,6 +27,8 @@
 #include "fast/interpreter.h"
 #include "ship/config/ConsoleVariable.h"
 
+#include <sstream>
+
 namespace Fast {
 int GfxRenderingAPIOGL::GetMaxTextureSize() {
     GLint max_texture_size;
@@ -380,6 +382,31 @@ static std::string BuildVsShader(const CCFeatures& cc_features) {
     return result;
 }
 
+// A failed shader compile used to abort() with the diagnostics commented out on
+// the vertex path, which makes a dialect problem impossible to diagnose on the
+// device. Log the driver's info log and the generated source before dying.
+static void LogShaderCompileFailure(const char* stage, GLuint shader, const std::string& source, uint64_t shader_id0,
+                                    uint32_t shader_id1) {
+    GLint max_length = 0;
+    glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &max_length);
+    std::string info_log(max_length > 0 ? max_length : 1, '\0');
+    if (max_length > 0) {
+        glGetShaderInfoLog(shader, max_length, &max_length, info_log.data());
+    }
+
+    SPDLOG_ERROR("{} shader compilation failed (shader_id0=0x{:016x} shader_id1=0x{:08x})", stage, shader_id0,
+                 shader_id1);
+    SPDLOG_ERROR("info log: {}", info_log.c_str());
+
+    // Numbered, so the line the driver names can actually be found.
+    std::string line;
+    std::istringstream stream(source);
+    int n = 1;
+    while (std::getline(stream, line)) {
+        SPDLOG_ERROR("{:4d} | {}", n++, line);
+    }
+}
+
 ShaderProgram* GfxRenderingAPIOGL::CreateAndLoadNewShader(uint64_t shader_id0, uint32_t shader_id1) {
     CCFeatures cc_features;
     gfx_cc_get_features(shader_id0, shader_id1, &cc_features);
@@ -394,12 +421,7 @@ ShaderProgram* GfxRenderingAPIOGL::CreateAndLoadNewShader(uint64_t shader_id0, u
     glCompileShader(vertex_shader);
     glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &success);
     if (!success) {
-        GLint max_length = 0;
-        glGetShaderiv(vertex_shader, GL_INFO_LOG_LENGTH, &max_length);
-        char error_log[1024];
-        // fprintf(stderr, "Vertex shader compilation failed\n");
-        glGetShaderInfoLog(vertex_shader, max_length, &max_length, &error_log[0]);
-        // fprintf(stderr, "%s\n", &error_log[0]);
+        LogShaderCompileFailure("vertex", vertex_shader, vs_buf, shader_id0, shader_id1);
         abort();
     }
 
@@ -408,12 +430,7 @@ ShaderProgram* GfxRenderingAPIOGL::CreateAndLoadNewShader(uint64_t shader_id0, u
     glCompileShader(fragment_shader);
     glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &success);
     if (!success) {
-        GLint max_length = 0;
-        glGetShaderiv(fragment_shader, GL_INFO_LOG_LENGTH, &max_length);
-        char error_log[1024];
-        fprintf(stderr, "Fragment shader compilation failed\n");
-        glGetShaderInfoLog(fragment_shader, max_length, &max_length, &error_log[0]);
-        fprintf(stderr, "%s\n", &error_log[0]);
+        LogShaderCompileFailure("fragment", fragment_shader, fs_buf, shader_id0, shader_id1);
         abort();
     }
 
