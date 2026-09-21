@@ -390,6 +390,10 @@ class Interpreter {
 
     // private: TODO make these private
     void Flush();
+    // Drops every cached shader variant, including the ShaderProgram* held by each colour
+    // combiner. Call between frames only. Used when texture filtering changes at runtime, since
+    // that choice is baked into the shader source rather than the variant key.
+    void ResetShaderCache();
     ShaderProgram* LookupOrCreateShaderProgram(uint64_t id0, uint64_t id1);
     ColorCombiner* LookupOrCreateColorCombiner(const ColorCombinerKey& key);
     void TextureCacheClear();

@@ -157,6 +157,11 @@ void Fast3dWindow::InitWindowManager() {
 
 void Fast3dWindow::SetTextureFilter(FilteringMode filteringMode) {
     mInterpreter->GetCurrentRenderingAPI()->SetTextureFilter(filteringMode);
+    // The filtering mode is baked into the shader source rather than the variant key, so already
+    // compiled variants keep the old sampling path. Dropping the cache is what makes a change of
+    // mode take effect without restarting. At startup the pools are empty and this is free; the
+    // caller must otherwise be between frames.
+    mInterpreter->ResetShaderCache();
 }
 
 void Fast3dWindow::EnableSRGBMode() {

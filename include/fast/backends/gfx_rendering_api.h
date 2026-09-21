@@ -67,6 +67,12 @@ class GfxRenderingAPI {
     // no-op rather than being pure virtual.
     virtual void DiscardDepthStencil() {
     }
+    // Drops every compiled shader variant so that the next draw rebuilds them. Needed when a
+    // setting baked into the shader source at build time changes - texture filtering is the one
+    // that exists today - because the variant key does not include it. Only safe to call between
+    // frames, never with a draw in flight. Backends with no such cache need do nothing.
+    virtual void ClearShaderCache() {
+    }
     virtual void ReadFramebufferToCPU(int fbId, uint32_t width, uint32_t height, uint16_t* rgba16Buf) = 0;
     virtual void ResolveMSAAColorBuffer(int fbIdTarger, int fbIdSrc) = 0;
     virtual std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff>

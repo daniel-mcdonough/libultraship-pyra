@@ -132,6 +132,20 @@ void Interpreter::Flush() {
     }
 }
 
+void Interpreter::ResetShaderCache() {
+    // Order matters. Anything still batched has to be drawn with the programs that are about to
+    // be deleted, so flush first.
+    Flush();
+
+    // Every ColorCombiner caches a ShaderProgram* per texture-clamp permutation. Those pointers
+    // are about to dangle, so the pool goes with the cache rather than being selectively patched.
+    mColorCombinerPool.clear();
+    mPrevCombiner = mColorCombinerPool.end();
+    mRenderingState.mShaderProgram = nullptr;
+
+    mRapi->ClearShaderCache();
+}
+
 ShaderProgram* Interpreter::LookupOrCreateShaderProgram(uint64_t id0, uint64_t id1) {
     ShaderProgram* prg = mRapi->LookupShader(id0, id1);
     if (prg == nullptr) {

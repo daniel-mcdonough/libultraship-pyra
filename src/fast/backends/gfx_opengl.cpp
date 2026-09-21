@@ -644,6 +644,25 @@ ShaderProgram* GfxRenderingAPIOGL::CreateAndLoadNewShader(uint64_t shader_id0, u
     return prg;
 }
 
+void GfxRenderingAPIOGL::ClearShaderCache() {
+    // Texture filtering is compiled into the shader source (o_three_point_filtering) but is not
+    // part of the variant key, so changing it at runtime requires throwing the cache away. The
+    // caller is responsible for also dropping every ShaderProgram* held elsewhere - see
+    // Interpreter::ResetShaderCache, which owns the colour-combiner pool that caches them.
+    for (auto& entry : mShaderProgramPool) {
+        for (unsigned int i = 0; i < entry.second.numAttribs; i++) {
+            if (entry.second.attribLocations[i] >= 0) {
+                glDisableVertexAttribArray(entry.second.attribLocations[i]);
+            }
+        }
+        glDeleteProgram(entry.second.openglProgramId);
+    }
+    mShaderProgramPool.clear();
+    mCurrentShaderProgram = nullptr;
+    mLastLoadedShader = nullptr;
+    glUseProgram(0);
+}
+
 struct ShaderProgram* GfxRenderingAPIOGL::LookupShader(uint64_t shader_id0, uint32_t shader_id1) {
     auto it = mShaderProgramPool.find(std::make_pair(shader_id0, shader_id1));
     return it == mShaderProgramPool.end() ? nullptr : &it->second;
