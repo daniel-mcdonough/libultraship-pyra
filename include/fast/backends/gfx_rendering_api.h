@@ -35,6 +35,10 @@ class GfxRenderingAPI {
     virtual GfxClipParameters GetClipParameters() = 0;
     virtual void UnloadShader(ShaderProgram* oldPrg) = 0;
     virtual void LoadShader(ShaderProgram* newPrg) = 0;
+    // Drops every compiled shader variant so that the next draw rebuilds them. Needed when a
+    // setting baked into the shader source at build time changes - texture filtering is the one
+    // that exists today - because the variant key does not include it. Only safe to call between
+    // frames, never with a draw in flight.
     virtual void ClearShaderCache() = 0;
     virtual ShaderProgram* CreateAndLoadNewShader(uint64_t shaderId0, uint64_t shaderId1) = 0;
     virtual ShaderProgram* LookupShader(uint64_t shaderId0, uint64_t shaderId1) = 0;
