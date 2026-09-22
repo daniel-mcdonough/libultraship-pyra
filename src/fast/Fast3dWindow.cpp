@@ -103,8 +103,14 @@ void Fast3dWindow::Init() {
     mWindowManagerApi->SetKeyboardCallbacks(KeyDown, KeyUp, AllKeysUp);
     mWindowManagerApi->SetMouseCallbacks(MouseButtonDown, MouseButtonUp);
 
+    // Pyra default: bilinear, not the N64's three-point. Three-point is emulated in the fragment
+    // shader - three texture2D fetches plus fract/step/sign/abs per texture unit, six fetches in
+    // 2-cycle mode where bilinear issues two - while bilinear's four taps are free in the SGX
+    // fixed-function texture unit. Measured at 19.88% of frame time on this GPU, which is the
+    // difference between 27.1 FPS and 33.9 FPS, and no visible difference at 3x zoom.
+    // See docs/pyra/08-optimisation-opportunities.md §8.13 and §8.14.
     SetTextureFilter((FilteringMode)Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(
-        CVAR_TEXTURE_FILTER, FILTER_THREE_POINT));
+        CVAR_TEXTURE_FILTER, FILTER_LINEAR));
 }
 
 int32_t Fast3dWindow::GetTargetFps() {
