@@ -167,6 +167,10 @@ void Fast3dWindow::SetTextureFilter(FilteringMode filteringMode) {
     // compiled variants keep the old sampling path. Dropping the cache is what makes a change of
     // mode take effect without restarting. At startup the pools are empty and this is free; the
     // caller must otherwise be between frames.
+    ResetShaderCache();
+}
+
+void Fast3dWindow::ResetShaderCache() {
     mInterpreter->ResetShaderCache();
 }
 

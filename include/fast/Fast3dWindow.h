@@ -54,6 +54,10 @@ class Fast3dWindow : public Ship::Window {
     void GetPixelDepthPrepare(float x, float y);
     uint16_t GetPixelDepth(float x, float y);
     void SetTextureFilter(FilteringMode filteringMode);
+    // Throw away every compiled shader variant. Needed by anything that changes a setting
+    // baked into the shader source rather than into the variant key - CVAR_SHADER_OPTS is
+    // the other one besides the filtering mode. Must be called between frames.
+    void ResetShaderCache();
     void SetRendererUCode(UcodeHandlers ucode);
     void EnableSRGBMode();
     bool DrawAndRunGraphicsCommands(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtxReplacements);

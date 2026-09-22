@@ -144,20 +144,36 @@ void GfxRenderingAPIOGL::SetPerDrawUniforms() {
         GLint filtering[2] = { textures[mCurrentTextureIds[0]].filtering, textures[mCurrentTextureIds[1]].filtering };
         glUniform1iv(mCurrentShaderProgram->texture_filtering_location, 2, filtering);
 
-        GLint width[2] = { textures[mCurrentTextureIds[0]].width, textures[mCurrentTextureIds[1]].width };
-        glUniform1iv(mCurrentShaderProgram->texture_width_location, 2, width);
+        if (mCurrentShaderProgram->floatTexSize) {
+            GLfloat size[4] = { (GLfloat)textures[mCurrentTextureIds[0]].width,
+                                (GLfloat)textures[mCurrentTextureIds[0]].height,
+                                (GLfloat)textures[mCurrentTextureIds[1]].width,
+                                (GLfloat)textures[mCurrentTextureIds[1]].height };
+            glUniform2fv(mCurrentShaderProgram->texture_size_location, 2, size);
+        } else {
+            GLint width[2] = { textures[mCurrentTextureIds[0]].width, textures[mCurrentTextureIds[1]].width };
+            glUniform1iv(mCurrentShaderProgram->texture_width_location, 2, width);
 
-        GLint height[2] = { textures[mCurrentTextureIds[0]].height, textures[mCurrentTextureIds[1]].height };
-        glUniform1iv(mCurrentShaderProgram->texture_height_location, 2, height);
+            GLint height[2] = { textures[mCurrentTextureIds[0]].height, textures[mCurrentTextureIds[1]].height };
+            glUniform1iv(mCurrentShaderProgram->texture_height_location, 2, height);
+        }
     }
 
     // Mask dimensions replace textureSize(), which GLSL ES 1.00 does not have.
     if (mCurrentShaderProgram->usedTextures[2] || mCurrentShaderProgram->usedTextures[3]) {
-        GLint width[2] = { textures[mCurrentTextureIds[2]].width, textures[mCurrentTextureIds[3]].width };
-        glUniform1iv(mCurrentShaderProgram->mask_width_location, 2, width);
+        if (mCurrentShaderProgram->floatTexSize) {
+            GLfloat size[4] = { (GLfloat)textures[mCurrentTextureIds[2]].width,
+                                (GLfloat)textures[mCurrentTextureIds[2]].height,
+                                (GLfloat)textures[mCurrentTextureIds[3]].width,
+                                (GLfloat)textures[mCurrentTextureIds[3]].height };
+            glUniform2fv(mCurrentShaderProgram->mask_size_location, 2, size);
+        } else {
+            GLint width[2] = { textures[mCurrentTextureIds[2]].width, textures[mCurrentTextureIds[3]].width };
+            glUniform1iv(mCurrentShaderProgram->mask_width_location, 2, width);
 
-        GLint height[2] = { textures[mCurrentTextureIds[2]].height, textures[mCurrentTextureIds[3]].height };
-        glUniform1iv(mCurrentShaderProgram->mask_height_location, 2, height);
+            GLint height[2] = { textures[mCurrentTextureIds[2]].height, textures[mCurrentTextureIds[3]].height };
+            glUniform1iv(mCurrentShaderProgram->mask_height_location, 2, height);
+        }
     }
 }
 
@@ -307,6 +323,78 @@ prism::ContextTypes* append_formula(prism::ContextTypes* _, prism::ContextTypes*
     return new prism::ContextTypes{ out };
 }
 
+// --- Combiner range analysis (SHADER_OPT_ELIDE_NOOP_WRAP) --------------------------------------
+//
+// The N64 colour combiner wraps rather than saturates: a cycle's output is taken modulo the signal
+// range, which the shader models with WRAP() before the final clamp. That wrap is not always
+// reachable. Fast3D already reduces a combiner whose operands make it degenerate (interpreter.cpp,
+// gfx_cc_get_features) to one of three shorter forms, and none of them can leave [0,1] when their
+// operands are inside it:
+//
+//   do_single   -> D                 one operand, unchanged
+//   do_multiply -> A * C             product of two values in [0,1]
+//   do_mix      -> mix(B, A, C)      interpolation between two values in [0,1]
+//
+// Only the full (A - B) * C + D form can, reaching [-1, 2]. There the wrap is load-bearing: a
+// combiner output of 1.8 must come out as -0.22 and then clamp to black, not saturate to white.
+//
+// Every operand a cycle can name is itself in [0,1]: the constants, the shade/prim/env inputs, a
+// texture sample (three-point filtering interpolates between three samples with weights that sum
+// to one, so it cannot overshoot either), and the noise term. The exception is SHADER_COMBINED,
+// the previous cycle's output, which is only in [0,1] if that cycle was itself in range - and in
+// cycle 0 it names an uninitialised variable, so it never is.
+static bool CombinerOperandInRange(int item, bool prevCycleInRange) {
+    return item != SHADER_COMBINED || prevCycleInRange;
+}
+
+// i selects the channel: 0 colour, 1 alpha. The form tests are in the same order as
+// append_formula, which picks the first that matches.
+static bool CombinerChannelInRange(const CCFeatures& cc, int c, int i, bool prevCycleInRange) {
+    if (cc.do_single[c][i]) {
+        return CombinerOperandInRange(cc.c[c][i][3], prevCycleInRange);
+    }
+    if (cc.do_multiply[c][i]) {
+        return CombinerOperandInRange(cc.c[c][i][0], prevCycleInRange) &&
+               CombinerOperandInRange(cc.c[c][i][2], prevCycleInRange);
+    }
+    if (cc.do_mix[c][i]) {
+        return CombinerOperandInRange(cc.c[c][i][0], prevCycleInRange) &&
+               CombinerOperandInRange(cc.c[c][i][1], prevCycleInRange) &&
+               CombinerOperandInRange(cc.c[c][i][2], prevCycleInRange);
+    }
+    return false;
+}
+
+static bool CombinerCycleInRange(const CCFeatures& cc, int c, bool prevCycleInRange) {
+    if (!CombinerChannelInRange(cc, c, 0, prevCycleInRange)) {
+        return false;
+    }
+    // Alpha only gets a formula of its own when it differs from the colour one; otherwise the
+    // colour formula is emitted as a vec4 and covers both.
+    if (cc.opt_alpha && !cc.color_alpha_same[c]) {
+        return CombinerChannelInRange(cc, c, 1, prevCycleInRange);
+    }
+    return true;
+}
+
+// Whether the cycle whose wrap is under consideration is provably in range. last=false asks about
+// cycle 0, whose wrap sits between the two cycles; last=true about whichever cycle produces the
+// final colour.
+//
+// Cycle 0 has no previous cycle, so SHADER_COMBINED there is out of range by definition. When
+// cycle 0 is in range its wrap is elided, which leaves texel in [0,1] for cycle 1 to consume - so
+// cycle 0's own verdict is exactly what cycle 1 should be handed as its prevCycleInRange.
+static bool CombinerCycleInRangeFor(const CCFeatures& cc, int shaderOpts, bool last) {
+    if ((shaderOpts & SHADER_OPT_ELIDE_NOOP_WRAP) == 0) {
+        return false;
+    }
+    const bool cycle0 = CombinerCycleInRange(cc, 0, false);
+    if (!last || !cc.opt_2cyc) {
+        return cycle0;
+    }
+    return CombinerCycleInRange(cc, 1, cycle0);
+}
+
 std::optional<std::string> opengl_include_fs(const std::string& path) {
     auto init = std::make_shared<Ship::ResourceInitData>();
     init->Type = (uint32_t)Ship::ResourceType::Shader;
@@ -321,7 +409,10 @@ std::optional<std::string> opengl_include_fs(const std::string& path) {
     return *inc;
 }
 
-std::string GfxRenderingAPIOGL::BuildFsShader(const CCFeatures& cc_features) {
+std::string GfxRenderingAPIOGL::BuildFsShader(const CCFeatures& cc_features, int shaderOpts) {
+    const bool cycle0InRange = CombinerCycleInRangeFor(cc_features, shaderOpts, false);
+    const bool lastCycleInRange = CombinerCycleInRangeFor(cc_features, shaderOpts, true);
+
     prism::Processor processor;
     prism::ContextItems mContext = {
         { "o_c", M_ARRAY(cc_features.c, int, 2, 2, 4) },
@@ -362,6 +453,9 @@ std::string GfxRenderingAPIOGL::BuildFsShader(const CCFeatures& cc_features) {
         { "SHADER_COMBINED", SHADER_COMBINED },
         { "SHADER_NOISE", SHADER_NOISE },
         { "o_three_point_filtering", mCurrentFilterMode == FILTER_THREE_POINT },
+        { "o_wrap_mid", !cycle0InRange },
+        { "o_wrap_out", !lastCycleInRange },
+        { "o_float_tex_size", (shaderOpts & SHADER_OPT_FLOAT_TEX_SIZE) != 0 },
         { "append_formula", (InvokeFunc)append_formula },
 #ifdef __APPLE__
         { "GLSL_VERSION", "#version 410 core" },
@@ -520,7 +614,10 @@ static void LogShaderCompileFailure(const char* stage, GLuint shader, const std:
 ShaderProgram* GfxRenderingAPIOGL::CreateAndLoadNewShader(uint64_t shader_id0, uint32_t shader_id1) {
     CCFeatures cc_features;
     gfx_cc_get_features(shader_id0, shader_id1, &cc_features);
-    const auto fs_buf = BuildFsShader(cc_features);
+    // Read once per program and remembered on it. Changing this CVar needs the shader cache
+    // dropped, the same as the filtering mode - see Fast3dWindow::SetTextureFilter.
+    const int shaderOpts = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(CVAR_SHADER_OPTS, 0);
+    const auto fs_buf = BuildFsShader(cc_features, shaderOpts);
     const auto vs_buf = BuildVsShader(cc_features);
     const GLchar* sources[2] = { vs_buf.data(), fs_buf.data() };
     const GLint lengths[2] = { (GLint)vs_buf.size(), (GLint)fs_buf.size() };
@@ -613,6 +710,29 @@ ShaderProgram* GfxRenderingAPIOGL::CreateAndLoadNewShader(uint64_t shader_id0, u
     prg->texture_filtering_location = glGetUniformLocation(shader_program, "texture_filtering");
     prg->mask_width_location = glGetUniformLocation(shader_program, "mask_width");
     prg->mask_height_location = glGetUniformLocation(shader_program, "mask_height");
+    prg->texture_size_location = glGetUniformLocation(shader_program, "texture_size");
+    prg->mask_size_location = glGetUniformLocation(shader_program, "mask_size");
+    prg->floatTexSize = (shaderOpts & SHADER_OPT_FLOAT_TEX_SIZE) != 0;
+
+    // The shader source lives in soh.o2r, so a device can be running this binary against an older
+    // archive. The old template declares texture_width, which the new one never does when float
+    // sizes are asked for; finding it means the archive predates the change. Uploading vec2s to a
+    // program with no vec2 uniforms would silently leave every texture size unset, so fall back to
+    // the layout the shader actually has rather than render a frame with garbage sizes in it.
+    if (prg->floatTexSize && prg->texture_width_location != -1) {
+        SPDLOG_WARN("soh.o2r is older than this binary: default.shader.fs has no vec2 size "
+                    "uniforms. Ignoring SHADER_OPT_FLOAT_TEX_SIZE.");
+        prg->floatTexSize = false;
+    }
+
+    // What share of the variants a scene actually uses qualify for the elision is not knowable
+    // from the code - it depends on which combiners the game sets - so say so per variant. Only
+    // when the elision is asked for, which is off by default. See docs/pyra/NEXT.md item A.
+    if (shaderOpts & SHADER_OPT_ELIDE_NOOP_WRAP) {
+        SPDLOG_INFO("shader {:016x}/{:08x}: 2cyc={} wrap_mid={} wrap_out={}", shader_id0, shader_id1,
+                    cc_features.opt_2cyc, !CombinerCycleInRangeFor(cc_features, shaderOpts, false),
+                    !CombinerCycleInRangeFor(cc_features, shaderOpts, true));
+    }
 
     LoadShader(prg);
 

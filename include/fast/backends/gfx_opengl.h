@@ -30,6 +30,18 @@
 #include <SDL2/SDL_opengl.h>
 #endif
 namespace Fast {
+
+// Bits of CVAR_SHADER_OPTS. Both are fragment-shader economies staged for one A/B on the Pyra
+// (docs/pyra/NEXT.md item A). A bitmask rather than two CVars because the benchmark harness
+// switches arms by setting a single CVar, and because the pair can then be split afterwards
+// without adding a second one. 0 is the shader as generated upstream.
+enum ShaderOptBits {
+    // Emit the combiner's WRAP() only for cycles whose output can actually leave [0,1].
+    SHADER_OPT_ELIDE_NOOP_WRAP = 1 << 0,
+    // Pass texture and mask dimensions as vec2 rather than as int pairs converted per fragment.
+    SHADER_OPT_FLOAT_TEX_SIZE = 1 << 1,
+};
+
 struct ShaderProgram {
     GLuint openglProgramId;
     uint8_t numInputs;
@@ -45,6 +57,11 @@ struct ShaderProgram {
     GLint texture_filtering_location;
     GLint mask_width_location;
     GLint mask_height_location;
+    GLint texture_size_location;
+    GLint mask_size_location;
+    // Which of the two uniform layouts this program was compiled with. Held per program rather
+    // than read from the CVar at draw time so that a program always outlives its own layout.
+    bool floatTexSize;
 };
 
 struct FramebufferOGL {
@@ -112,7 +129,7 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
 
   private:
     void SetUniforms(ShaderProgram* prg) const;
-    std::string BuildFsShader(const CCFeatures& cc_features);
+    std::string BuildFsShader(const CCFeatures& cc_features, int shaderOpts);
     void SetPerDrawUniforms();
 
     std::vector<TextureInfo> textures;
