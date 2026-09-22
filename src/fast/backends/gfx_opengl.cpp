@@ -828,6 +828,13 @@ void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size
     SetPerDrawUniforms();
 
     // printf("flushing %d tris\n", buf_vbo_num_tris);
+    // Orphaning the whole VBO every batch looks like the thing to fix, and on the PowerVR SGX544
+    // it is not. Measured on device, in us per draw: this path 68, one glBufferData per frame with
+    // offsets 60, client-side arrays 58, and a pre-allocated ring buffer written with
+    // glBufferSubData - the modern advice, and what a graphics programmer reaches for first - 221.
+    // Four times worse. Leave it alone unless you have re-measured on the target driver.
+    // See docs/pyra/05-phase0-device-measurements.md and docs/pyra/08-optimisation-opportunities.md
+    // section 8.6.
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) * buf_vbo_len, buf_vbo, GL_STREAM_DRAW);
     glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
 }
