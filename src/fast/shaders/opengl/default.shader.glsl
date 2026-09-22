@@ -125,11 +125,17 @@
     uniform float prim_depth;
     @end
 
-    uniform int texture_width[2];
-    uniform int texture_height[2];
     uniform int texture_filtering[2];
-    uniform int mask_width[2];
-    uniform int mask_height[2];
+
+    @if(o_float_tex_size)
+        uniform vec2 texture_size[2];
+        uniform vec2 mask_size[2];
+    @else
+        uniform int texture_width[2];
+        uniform int texture_height[2];
+        uniform int mask_width[2];
+        uniform int mask_height[2];
+    @end
 
     #define TEX_OFFSET(off) @{texture}(tex, texCoord - off / texSize)
     #define WRAP(x, low, high) mod((x)-(low), (high)-(low)) + (low)
@@ -164,8 +170,13 @@
         return @{texture}(tex, uv);
     }
 
-    #define TEX_SIZE(tex) vec2(texture_width[tex], texture_height[tex])
-    #define MASK_SIZE(tex) vec2(mask_width[tex], mask_height[tex])
+    @if(o_float_tex_size)
+        #define TEX_SIZE(tex) texture_size[tex]
+        #define MASK_SIZE(tex) mask_size[tex]
+    @else
+        #define TEX_SIZE(tex) vec2(texture_width[tex], texture_height[tex])
+        #define MASK_SIZE(tex) vec2(mask_width[tex], mask_height[tex])
+    @end
 
     void main() {
         @for(i in 0..2)
@@ -219,18 +230,20 @@
 
         @for(c in 0..f_range)
             @if(c == 1)
-                @if(o_alpha)
-                    @if(o_c[c][1][2] == SHADER_COMBINED)
-                        texel.a = WRAP(texel.a, -1.01, 1.01);
-                    @else
-                        texel.a = WRAP(texel.a, -0.51, 1.51);
+                @if(o_wrap_mid)
+                    @if(o_alpha)
+                        @if(o_c[c][1][2] == SHADER_COMBINED)
+                            texel.a = WRAP(texel.a, -1.01, 1.01);
+                        @else
+                            texel.a = WRAP(texel.a, -0.51, 1.51);
+                        @end
                     @end
-                @end
 
-                @if(o_c[c][0][2] == SHADER_COMBINED)
-                    texel.rgb = WRAP(texel.rgb, -1.01, 1.01);
-                @else
-                    texel.rgb = WRAP(texel.rgb, -0.51, 1.51);
+                    @if(o_c[c][0][2] == SHADER_COMBINED)
+                        texel.rgb = WRAP(texel.rgb, -1.01, 1.01);
+                    @else
+                        texel.rgb = WRAP(texel.rgb, -0.51, 1.51);
+                    @end
                 @end
             @end
 
@@ -248,7 +261,9 @@
             @end
         @end
 
-        texel = WRAP(texel, -0.51, 1.51);
+        @if(o_wrap_out)
+            texel = WRAP(texel, -0.51, 1.51);
+        @end
         texel = clamp(texel, 0.0, 1.0);
         // TODO discard if alpha is 0?
         @if(o_fog)
