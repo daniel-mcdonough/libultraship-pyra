@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <chrono>
 #include <map>
 #include <unordered_map>
 
@@ -191,6 +192,7 @@ void GfxRenderingAPIOGL::UnloadShader(ShaderProgram* old_prg) {
 }
 
 void GfxRenderingAPIOGL::LoadShader(ShaderProgram* new_prg) {
+    BENCH_COUNT(BENCH_SHADER_LOADS, 1);
     // if (!new_prg) return;
     mCurrentShaderProgram = new_prg;
     if (new_prg != mLastLoadedShader) {
@@ -852,6 +854,8 @@ void GfxRenderingAPIOGL::UploadTexture(const uint8_t* rgba32_buf, uint32_t width
     if (width == 0 || height == 0) {
         return;
     }
+    BENCH_COUNT(BENCH_TEX_UPLOADS, 1);
+    BENCH_COUNT(BENCH_TEX_UPLOAD_KB, (width * height * 4) / 1024);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba32_buf);
     textures[mCurrentTextureIds[mCurrentTile]].width = width;
     textures[mCurrentTextureIds[mCurrentTile]].height = height;
@@ -936,6 +940,8 @@ void GfxRenderingAPIOGL::SetUseAlpha(bool use_alpha) {
 }
 
 void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
+    BENCH_COUNT(BENCH_DRAWS, 1);
+    BENCH_COUNT(BENCH_TRIS, buf_vbo_num_tris);
     if (mCurrentDepthTest != mLastDepthTest || mCurrentDepthMask != mLastDepthMask) {
         mLastDepthTest = mCurrentDepthTest;
         mLastDepthMask = mCurrentDepthMask;
@@ -1078,6 +1084,15 @@ void GfxRenderingAPIOGL::EndFrame() {
     // The frame is finished and the buffer swap is next, so the default framebuffer's depth and
     // stencil are dead. Colour is left alone - it is what gets presented.
     DiscardDepthStencil();
+#ifdef SOH_BENCHMARK
+    if (gBenchFinish) {
+        const auto finishStart = std::chrono::steady_clock::now();
+        glFinish();
+        gBenchFinishMicros += (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+                                  std::chrono::steady_clock::now() - finishStart)
+                                  .count();
+    }
+#endif
     glFlush();
 }
 
@@ -1129,6 +1144,7 @@ void GfxRenderingAPIOGL::UpdateFramebufferParameters(int fb_id, uint32_t width, 
 
     if (fb_id != 0) {
         if (fb.width != width || fb.height != height || fb.msaa_level != msaa_level) {
+            BENCH_COUNT(BENCH_FB_REALLOCS, 1);
             if (msaa_level <= 1) {
                 glBindTexture(GL_TEXTURE_2D, fb.clrbuf);
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
@@ -1168,6 +1184,7 @@ void GfxRenderingAPIOGL::UpdateFramebufferParameters(int fb_id, uint32_t width, 
 }
 
 void GfxRenderingAPIOGL::StartDrawToFramebuffer(int fb_id, float noise_scale) {
+    BENCH_COUNT(BENCH_FB_BINDS, 1);
     FramebufferOGL& fb = mFrameBuffers[fb_id];
 
     if (noise_scale != 0.0f) {
@@ -1178,6 +1195,7 @@ void GfxRenderingAPIOGL::StartDrawToFramebuffer(int fb_id, float noise_scale) {
 }
 
 void GfxRenderingAPIOGL::ClearFramebuffer(bool color, bool depth) {
+    BENCH_COUNT(BENCH_CLEARS, 1);
     if (mLastScissorEnabled != 0) {
         mLastScissorEnabled = 0;
         glDisable(GL_SCISSOR_TEST);
@@ -1355,6 +1373,7 @@ void GfxRenderingAPIOGL::SelectTextureFb(int fb_id) {
 
 void GfxRenderingAPIOGL::CopyFramebuffer(int fb_dst_id, int fb_src_id, int srcX0, int srcY0, int srcX1, int srcY1,
                                          int dstX0, int dstY0, int dstX1, int dstY1) {
+    BENCH_COUNT(BENCH_FB_COPIES, 1);
     if (fb_dst_id >= (int)mFrameBuffers.size() || fb_src_id >= (int)mFrameBuffers.size()) {
         return;
     }
@@ -1441,6 +1460,7 @@ void GfxRenderingAPIOGL::CopyFramebuffer(int fb_dst_id, int fb_src_id, int srcX0
 }
 
 void GfxRenderingAPIOGL::ReadFramebufferToCPU(int fb_id, uint32_t width, uint32_t height, uint16_t* rgba16_buf) {
+    BENCH_COUNT(BENCH_FB_READBACKS, 1);
     if (fb_id >= (int)mFrameBuffers.size()) {
         return;
     }
