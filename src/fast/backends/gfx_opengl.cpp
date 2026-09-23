@@ -616,7 +616,14 @@ ShaderProgram* GfxRenderingAPIOGL::CreateAndLoadNewShader(uint64_t shader_id0, u
     gfx_cc_get_features(shader_id0, shader_id1, &cc_features);
     // Read once per program and remembered on it. Changing this CVar needs the shader cache
     // dropped, the same as the filtering mode - see Fast3dWindow::SetTextureFilter.
-    const int shaderOpts = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(CVAR_SHADER_OPTS, 0);
+    //
+    // Both bits are on by default. Measured across three fixtures on the Pyra: -3.59% in the
+    // Market, -2.40% in Kokiri Forest, and a clean null in Hyrule Field, which is not
+    // fragment-bound and does not respond to any fragment-side change. Never negative anywhere,
+    // and visually identical against an in-session control at each. See
+    // docs/pyra/08-optimisation-opportunities.md 8.18.
+    const int shaderOpts = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(
+        CVAR_SHADER_OPTS, SHADER_OPT_ELIDE_NOOP_WRAP | SHADER_OPT_FLOAT_TEX_SIZE);
     const auto fs_buf = BuildFsShader(cc_features, shaderOpts);
     const auto vs_buf = BuildVsShader(cc_features);
     const GLchar* sources[2] = { vs_buf.data(), fs_buf.data() };
@@ -726,12 +733,15 @@ ShaderProgram* GfxRenderingAPIOGL::CreateAndLoadNewShader(uint64_t shader_id0, u
     }
 
     // What share of the variants a scene actually uses qualify for the elision is not knowable
-    // from the code - it depends on which combiners the game sets - so say so per variant. Only
-    // when the elision is asked for, which is off by default. See docs/pyra/NEXT.md item A.
+    // from the code - it depends on which combiners the game sets - so say so per variant. This
+    // is how 8.18 established that Hyrule Field elides 25 of its 26 variants and still gains
+    // nothing, which is what ruled out "the optimisation misses these shaders" and left "this
+    // frame is not fragment-bound". Debug level because the elision is now on by default and
+    // this is one line per variant per scene load.
     if (shaderOpts & SHADER_OPT_ELIDE_NOOP_WRAP) {
-        SPDLOG_INFO("shader {:016x}/{:08x}: 2cyc={} wrap_mid={} wrap_out={}", shader_id0, shader_id1,
-                    cc_features.opt_2cyc, !CombinerCycleInRangeFor(cc_features, shaderOpts, false),
-                    !CombinerCycleInRangeFor(cc_features, shaderOpts, true));
+        SPDLOG_DEBUG("shader {:016x}/{:08x}: 2cyc={} wrap_mid={} wrap_out={}", shader_id0, shader_id1,
+                     cc_features.opt_2cyc, !CombinerCycleInRangeFor(cc_features, shaderOpts, false),
+                     !CombinerCycleInRangeFor(cc_features, shaderOpts, true));
     }
 
     LoadShader(prg);
