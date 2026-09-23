@@ -9,6 +9,7 @@
 #include <stdio.h>
 
 #include <any>
+#include <chrono>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -4499,9 +4500,30 @@ void Interpreter::Run(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtx_r
     }
 }
 
+#ifdef SOH_BENCHMARK
+// Per-frame counters for the benchmark harness, which zeroes them at the start of each frame and
+// reads them at the end. Swap time is how long the CPU sat in SwapBuffersBegin, which on this
+// driver is mostly waiting for the GPU to catch up: a frame whose time is mostly swap is
+// GPU-bound, one whose time is mostly outside it is bound by submission.
+extern "C" {
+uint32_t gBenchCounters[BENCH_COUNTER_COUNT] = {};
+uint64_t gBenchSwapMicros = 0;
+int gBenchFinish = 0;
+uint64_t gBenchFinishMicros = 0;
+}
+#endif
+
 void Interpreter::EndFrame() {
     mRapi->EndFrame();
+#ifdef SOH_BENCHMARK
+    const auto swapStart = std::chrono::steady_clock::now();
+#endif
     mWapi->SwapBuffersBegin();
+#ifdef SOH_BENCHMARK
+    gBenchSwapMicros += (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::steady_clock::now() - swapStart)
+                            .count();
+#endif
     mRapi->FinishRender();
     mWapi->SwapBuffersEnd();
 }

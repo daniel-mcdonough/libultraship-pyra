@@ -123,6 +123,33 @@ void gfx_cc_get_features(uint64_t shader_id0, uint32_t shader_id1, struct CCFeat
 
 union Gfx;
 
+#ifdef SOH_BENCHMARK
+// Per-frame GL work counters for the benchmark harness; zeroed at the start of each frame.
+enum BenchCounter {
+    BENCH_DRAWS,
+    BENCH_TRIS,
+    BENCH_TEX_UPLOADS,
+    BENCH_TEX_UPLOAD_KB,
+    BENCH_FB_BINDS,
+    BENCH_CLEARS,
+    BENCH_FB_COPIES,
+    BENCH_FB_READBACKS,
+    BENCH_SHADER_LOADS,
+    BENCH_FB_REALLOCS,
+    BENCH_COUNTER_COUNT
+};
+extern "C" uint32_t gBenchCounters[BENCH_COUNTER_COUNT];
+extern "C" uint64_t gBenchSwapMicros;
+// When set, the renderer calls glFinish before the swap and times it, splitting "the GPU had not
+// finished the frame" from "presenting it took the time". Off by default: glFinish serialises CPU
+// and GPU, so it changes the thing being measured.
+extern "C" int gBenchFinish;
+extern "C" uint64_t gBenchFinishMicros;
+#define BENCH_COUNT(k, n) (gBenchCounters[(k)] += (uint32_t)(n))
+#else
+#define BENCH_COUNT(k, n) ((void)0)
+#endif
+
 namespace Fast {
 
 class GfxRenderingAPI;
