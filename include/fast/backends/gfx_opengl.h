@@ -31,10 +31,12 @@
 #endif
 namespace Fast {
 
-// Bits of CVAR_SHADER_OPTS. Both are fragment-shader economies staged for one A/B on the Pyra
-// (docs/pyra/NEXT.md item A). A bitmask rather than two CVars because the benchmark harness
-// switches arms by setting a single CVar, and because the pair can then be split afterwards
-// without adding a second one. 0 is the shader as generated upstream.
+// Bits of CVAR_SHADER_OPTS. Both are fragment-shader economies, measured on the Pyra and on by
+// default since; 0 is the shader as generated upstream. A bitmask rather than two CVars because
+// the benchmark harness switches arms by setting a single CVar, and because the pair can then be
+// split afterwards without adding a second one - which is how the two were shown not to be
+// additive (the wrap elision is essentially the whole win). The default lives at the one read
+// site in CreateAndLoadNewShader.
 enum ShaderOptBits {
     // Emit the combiner's WRAP() only for cycles whose output can actually leave [0,1].
     SHADER_OPT_ELIDE_NOOP_WRAP = 1 << 0,
