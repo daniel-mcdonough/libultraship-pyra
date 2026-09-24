@@ -209,5 +209,13 @@ class ConsoleVariable {
         }
     };
     std::unordered_map<std::string, std::shared_ptr<CVar>, TransparentStringHash, TransparentStringEqual> mVariables;
+
+    // gSettings.LeanCVar (§8.31): 0 the upstream lookup, a transparent find (#1022) that copies a
+    // shared_ptr per read; 1 the same find returning a raw pointer, without the copy; 2 (benchmark
+    // builds) a per-thread memo on the name pointer, a probe only - a pointer can later hold a
+    // different name. Read when it is set, and on Load.
+    int mLeanCVar = 0;
+    CVar* Find(const char* name);
+    void Changed(const char* name, bool structural);
 };
 } // namespace Ship
