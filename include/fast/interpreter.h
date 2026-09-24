@@ -155,6 +155,15 @@ enum BenchCounter {
     BENCH_LOOKUP_HIT,
     BENCH_LOOKUP_MISS,
     BENCH_LOOKUP_FLUSH,
+    // Calls into the GL driver from the OpenGL backend, all entry points (report 8 §8.24). Every
+    // one takes the PVR driver's user-space mutex, so this is what that mutex's share is paid per.
+    BENCH_GL_CALLS,
+    // The glUniform* subset of BENCH_GL_CALLS.
+    BENCH_GL_UNIFORMS,
+    // glBufferData calls and the bytes they upload: the suspect for the driver allocating and
+    // freeing device memory every frame (§8.21).
+    BENCH_VBO_UPLOADS,
+    BENCH_VBO_BYTES,
     BENCH_COUNTER_COUNT
 };
 extern "C" uint32_t gBenchCounters[BENCH_COUNTER_COUNT];

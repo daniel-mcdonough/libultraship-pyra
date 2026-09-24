@@ -31,6 +31,147 @@
 
 #include <sstream>
 
+#ifdef SOH_BENCHMARK
+// Count every call into the GL driver: BENCH_GL_CALLS per frame, and gBenchGlFn per entry point,
+// cumulative, which the harness snapshots at segment start and end (report 8 §8.24). These are
+// function-like macros over the real entry points, so they must stay below the last #include: a
+// GL header seen after them would have its prototypes rewritten. A name used below and missing
+// from the list goes uncounted.
+#define BENCH_GL_FNS(X, U) \
+    X(glActiveTexture) \
+    X(glAttachShader) \
+    X(glBindAttribLocation) \
+    X(glBindBuffer) \
+    X(glBindFramebuffer) \
+    X(glBindRenderbuffer) \
+    X(glBindTexture) \
+    X(glBindVertexArray) \
+    X(glBlendFunc) \
+    X(glBlitFramebuffer) \
+    X(glBufferData) \
+    X(glClear) \
+    X(glClearColor) \
+    X(glCompileShader) \
+    X(glCreateProgram) \
+    X(glCreateShader) \
+    X(glDeleteProgram) \
+    X(glDeleteRenderbuffers) \
+    X(glDeleteShader) \
+    X(glDeleteTextures) \
+    X(glDepthFunc) \
+    X(glDepthMask) \
+    X(glDisable) \
+    X(glDisableVertexAttribArray) \
+    X(glDrawArrays) \
+    X(glEnable) \
+    X(glEnableVertexAttribArray) \
+    X(glFinish) \
+    X(glFlush) \
+    X(glFramebufferRenderbuffer) \
+    X(glFramebufferTexture2D) \
+    X(glGenBuffers) \
+    X(glGenFramebuffers) \
+    X(glGenRenderbuffers) \
+    X(glGenTextures) \
+    X(glGenVertexArrays) \
+    X(glGetAttribLocation) \
+    X(glGetIntegerv) \
+    X(glGetProgramInfoLog) \
+    X(glGetProgramiv) \
+    X(glGetShaderInfoLog) \
+    X(glGetShaderiv) \
+    X(glGetString) \
+    X(glGetUniformLocation) \
+    X(glLinkProgram) \
+    X(glPolygonOffset) \
+    X(glReadBuffer) \
+    X(glReadPixels) \
+    X(glRenderbufferStorage) \
+    X(glRenderbufferStorageMultisample) \
+    X(glScissor) \
+    X(glShaderSource) \
+    X(glTexImage2D) \
+    X(glTexParameteri) \
+    X(glUseProgram) \
+    X(glVertexAttribPointer) \
+    X(glViewport) \
+    U(glUniform1f) \
+    U(glUniform1i) \
+    U(glUniform1iv) \
+    U(glUniform2fv)
+#define BENCH_GL_ENUM(n) BGL_##n,
+enum BenchGlFn { BENCH_GL_FNS(BENCH_GL_ENUM, BENCH_GL_ENUM) BGL_COUNT };
+#define BENCH_GL_NAME(n) #n,
+extern "C" {
+uint64_t gBenchGlFn[BGL_COUNT] = {};
+extern const char* const gBenchGlFnNames[BGL_COUNT] = { BENCH_GL_FNS(BENCH_GL_NAME, BENCH_GL_NAME) };
+extern const int gBenchGlFnCount = BGL_COUNT;
+}
+#define BENCH_GL_CALL(fn, ...) (BENCH_COUNT(BENCH_GL_CALLS, 1), gBenchGlFn[BGL_##fn]++, fn(__VA_ARGS__))
+#define BENCH_GL_UNIFORM(fn, ...) (BENCH_COUNT(BENCH_GL_UNIFORMS, 1), BENCH_GL_CALL(fn, __VA_ARGS__))
+#define glActiveTexture(...) BENCH_GL_CALL(glActiveTexture, __VA_ARGS__)
+#define glAttachShader(...) BENCH_GL_CALL(glAttachShader, __VA_ARGS__)
+#define glBindAttribLocation(...) BENCH_GL_CALL(glBindAttribLocation, __VA_ARGS__)
+#define glBindBuffer(...) BENCH_GL_CALL(glBindBuffer, __VA_ARGS__)
+#define glBindFramebuffer(...) BENCH_GL_CALL(glBindFramebuffer, __VA_ARGS__)
+#define glBindRenderbuffer(...) BENCH_GL_CALL(glBindRenderbuffer, __VA_ARGS__)
+#define glBindTexture(...) BENCH_GL_CALL(glBindTexture, __VA_ARGS__)
+#define glBindVertexArray(...) BENCH_GL_CALL(glBindVertexArray, __VA_ARGS__)
+#define glBlendFunc(...) BENCH_GL_CALL(glBlendFunc, __VA_ARGS__)
+#define glBlitFramebuffer(...) BENCH_GL_CALL(glBlitFramebuffer, __VA_ARGS__)
+#define glBufferData(...) BENCH_GL_CALL(glBufferData, __VA_ARGS__)
+#define glClear(...) BENCH_GL_CALL(glClear, __VA_ARGS__)
+#define glClearColor(...) BENCH_GL_CALL(glClearColor, __VA_ARGS__)
+#define glCompileShader(...) BENCH_GL_CALL(glCompileShader, __VA_ARGS__)
+#define glCreateProgram(...) BENCH_GL_CALL(glCreateProgram, __VA_ARGS__)
+#define glCreateShader(...) BENCH_GL_CALL(glCreateShader, __VA_ARGS__)
+#define glDeleteProgram(...) BENCH_GL_CALL(glDeleteProgram, __VA_ARGS__)
+#define glDeleteRenderbuffers(...) BENCH_GL_CALL(glDeleteRenderbuffers, __VA_ARGS__)
+#define glDeleteShader(...) BENCH_GL_CALL(glDeleteShader, __VA_ARGS__)
+#define glDeleteTextures(...) BENCH_GL_CALL(glDeleteTextures, __VA_ARGS__)
+#define glDepthFunc(...) BENCH_GL_CALL(glDepthFunc, __VA_ARGS__)
+#define glDepthMask(...) BENCH_GL_CALL(glDepthMask, __VA_ARGS__)
+#define glDisable(...) BENCH_GL_CALL(glDisable, __VA_ARGS__)
+#define glDisableVertexAttribArray(...) BENCH_GL_CALL(glDisableVertexAttribArray, __VA_ARGS__)
+#define glDrawArrays(...) BENCH_GL_CALL(glDrawArrays, __VA_ARGS__)
+#define glEnable(...) BENCH_GL_CALL(glEnable, __VA_ARGS__)
+#define glEnableVertexAttribArray(...) BENCH_GL_CALL(glEnableVertexAttribArray, __VA_ARGS__)
+#define glFinish(...) BENCH_GL_CALL(glFinish, __VA_ARGS__)
+#define glFlush(...) BENCH_GL_CALL(glFlush, __VA_ARGS__)
+#define glFramebufferRenderbuffer(...) BENCH_GL_CALL(glFramebufferRenderbuffer, __VA_ARGS__)
+#define glFramebufferTexture2D(...) BENCH_GL_CALL(glFramebufferTexture2D, __VA_ARGS__)
+#define glGenBuffers(...) BENCH_GL_CALL(glGenBuffers, __VA_ARGS__)
+#define glGenFramebuffers(...) BENCH_GL_CALL(glGenFramebuffers, __VA_ARGS__)
+#define glGenRenderbuffers(...) BENCH_GL_CALL(glGenRenderbuffers, __VA_ARGS__)
+#define glGenTextures(...) BENCH_GL_CALL(glGenTextures, __VA_ARGS__)
+#define glGenVertexArrays(...) BENCH_GL_CALL(glGenVertexArrays, __VA_ARGS__)
+#define glGetAttribLocation(...) BENCH_GL_CALL(glGetAttribLocation, __VA_ARGS__)
+#define glGetIntegerv(...) BENCH_GL_CALL(glGetIntegerv, __VA_ARGS__)
+#define glGetProgramInfoLog(...) BENCH_GL_CALL(glGetProgramInfoLog, __VA_ARGS__)
+#define glGetProgramiv(...) BENCH_GL_CALL(glGetProgramiv, __VA_ARGS__)
+#define glGetShaderInfoLog(...) BENCH_GL_CALL(glGetShaderInfoLog, __VA_ARGS__)
+#define glGetShaderiv(...) BENCH_GL_CALL(glGetShaderiv, __VA_ARGS__)
+#define glGetString(...) BENCH_GL_CALL(glGetString, __VA_ARGS__)
+#define glGetUniformLocation(...) BENCH_GL_CALL(glGetUniformLocation, __VA_ARGS__)
+#define glLinkProgram(...) BENCH_GL_CALL(glLinkProgram, __VA_ARGS__)
+#define glPolygonOffset(...) BENCH_GL_CALL(glPolygonOffset, __VA_ARGS__)
+#define glReadBuffer(...) BENCH_GL_CALL(glReadBuffer, __VA_ARGS__)
+#define glReadPixels(...) BENCH_GL_CALL(glReadPixels, __VA_ARGS__)
+#define glRenderbufferStorage(...) BENCH_GL_CALL(glRenderbufferStorage, __VA_ARGS__)
+#define glRenderbufferStorageMultisample(...) BENCH_GL_CALL(glRenderbufferStorageMultisample, __VA_ARGS__)
+#define glScissor(...) BENCH_GL_CALL(glScissor, __VA_ARGS__)
+#define glShaderSource(...) BENCH_GL_CALL(glShaderSource, __VA_ARGS__)
+#define glTexImage2D(...) BENCH_GL_CALL(glTexImage2D, __VA_ARGS__)
+#define glTexParameteri(...) BENCH_GL_CALL(glTexParameteri, __VA_ARGS__)
+#define glUseProgram(...) BENCH_GL_CALL(glUseProgram, __VA_ARGS__)
+#define glVertexAttribPointer(...) BENCH_GL_CALL(glVertexAttribPointer, __VA_ARGS__)
+#define glViewport(...) BENCH_GL_CALL(glViewport, __VA_ARGS__)
+#define glUniform1f(...) BENCH_GL_UNIFORM(glUniform1f, __VA_ARGS__)
+#define glUniform1i(...) BENCH_GL_UNIFORM(glUniform1i, __VA_ARGS__)
+#define glUniform1iv(...) BENCH_GL_UNIFORM(glUniform1iv, __VA_ARGS__)
+#define glUniform2fv(...) BENCH_GL_UNIFORM(glUniform2fv, __VA_ARGS__)
+#endif
+
 namespace Fast {
 
 #ifdef USE_OPENGLES2
@@ -136,49 +277,109 @@ static void VertexArraySetAttribs(ShaderProgram* prg) {
 }
 
 void GfxRenderingAPIOGL::SetUniforms(ShaderProgram* prg) const {
+    if (mLeanGLState >= 2) {
+        if (prg->frameUniformsValid && prg->lastFrameCount == (int)mFrameCount &&
+            prg->lastNoiseScale == mCurrentNoiseScale) {
+            return;
+        }
+        prg->frameUniformsValid = true;
+        prg->lastFrameCount = (int)mFrameCount;
+        prg->lastNoiseScale = mCurrentNoiseScale;
+    }
     glUniform1i(prg->frameCountLocation, mFrameCount);
     glUniform1f(prg->noiseScaleLocation, mCurrentNoiseScale);
 }
 
+// Mode >= 2: true when a uniform upload would change what the program holds, recording the new
+// values as it says so. `valid` is false until the program has received the uniform once.
+template <typename T, size_t N> static bool UniformChanged(bool& valid, T (&last)[N], const T (&now)[N]) {
+    if (valid && memcmp(last, now, sizeof(last)) == 0) {
+        return false;
+    }
+    valid = true;
+    memcpy(last, now, sizeof(last));
+    return true;
+}
+
 void GfxRenderingAPIOGL::SetPerDrawUniforms() {
-    if (mCurrentShaderProgram->usedTextures[0] || mCurrentShaderProgram->usedTextures[1]) {
-        GLint filtering[2] = { textures[mCurrentTextureIds[0]].filtering, textures[mCurrentTextureIds[1]].filtering };
-        glUniform1iv(mCurrentShaderProgram->texture_filtering_location, 2, filtering);
-
-        if (mCurrentShaderProgram->floatTexSize) {
-            GLfloat size[4] = { (GLfloat)textures[mCurrentTextureIds[0]].width,
-                                (GLfloat)textures[mCurrentTextureIds[0]].height,
-                                (GLfloat)textures[mCurrentTextureIds[1]].width,
-                                (GLfloat)textures[mCurrentTextureIds[1]].height };
-            glUniform2fv(mCurrentShaderProgram->texture_size_location, 2, size);
+    ShaderProgram* prg = mCurrentShaderProgram;
+    const bool lean = mLeanGLState >= 2;
+    if (prg->usedTextures[0] || prg->usedTextures[1]) {
+        const GLint filtering[2] = { textures[mCurrentTextureIds[0]].filtering, textures[mCurrentTextureIds[1]].filtering };
+        if (prg->floatTexSize) {
+            const GLfloat size[4] = { (GLfloat)textures[mCurrentTextureIds[0]].width,
+                                      (GLfloat)textures[mCurrentTextureIds[0]].height,
+                                      (GLfloat)textures[mCurrentTextureIds[1]].width,
+                                      (GLfloat)textures[mCurrentTextureIds[1]].height };
+            // Filtering and size are one group: both or neither, so the validity flag is shared.
+            bool v1 = prg->texUniformsValid, v2 = prg->texUniformsValid;
+            const bool fChanged = !lean || UniformChanged(v1, prg->lastFiltering, filtering);
+            const bool sChanged = !lean || UniformChanged(v2, prg->lastTexSize, size);
+            prg->texUniformsValid = lean;
+            if (fChanged) {
+                glUniform1iv(prg->texture_filtering_location, 2, filtering);
+            }
+            if (sChanged) {
+                glUniform2fv(prg->texture_size_location, 2, size);
+            }
         } else {
-            GLint width[2] = { textures[mCurrentTextureIds[0]].width, textures[mCurrentTextureIds[1]].width };
-            glUniform1iv(mCurrentShaderProgram->texture_width_location, 2, width);
-
-            GLint height[2] = { textures[mCurrentTextureIds[0]].height, textures[mCurrentTextureIds[1]].height };
-            glUniform1iv(mCurrentShaderProgram->texture_height_location, 2, height);
+            const GLint width[2] = { textures[mCurrentTextureIds[0]].width, textures[mCurrentTextureIds[1]].width };
+            const GLint height[2] = { textures[mCurrentTextureIds[0]].height, textures[mCurrentTextureIds[1]].height };
+            bool v1 = prg->texUniformsValid, v2 = prg->texUniformsValid, v3 = prg->texUniformsValid;
+            const bool fChanged = !lean || UniformChanged(v1, prg->lastFiltering, filtering);
+            const bool wChanged = !lean || UniformChanged(v2, prg->lastTexWidth, width);
+            const bool hChanged = !lean || UniformChanged(v3, prg->lastTexHeight, height);
+            prg->texUniformsValid = lean;
+            if (fChanged) {
+                glUniform1iv(prg->texture_filtering_location, 2, filtering);
+            }
+            if (wChanged) {
+                glUniform1iv(prg->texture_width_location, 2, width);
+            }
+            if (hChanged) {
+                glUniform1iv(prg->texture_height_location, 2, height);
+            }
         }
     }
 
     // Mask dimensions replace textureSize(), which GLSL ES 1.00 does not have.
-    if (mCurrentShaderProgram->usedTextures[2] || mCurrentShaderProgram->usedTextures[3]) {
-        if (mCurrentShaderProgram->floatTexSize) {
-            GLfloat size[4] = { (GLfloat)textures[mCurrentTextureIds[2]].width,
-                                (GLfloat)textures[mCurrentTextureIds[2]].height,
-                                (GLfloat)textures[mCurrentTextureIds[3]].width,
-                                (GLfloat)textures[mCurrentTextureIds[3]].height };
-            glUniform2fv(mCurrentShaderProgram->mask_size_location, 2, size);
+    if (prg->usedTextures[2] || prg->usedTextures[3]) {
+        if (prg->floatTexSize) {
+            const GLfloat size[4] = { (GLfloat)textures[mCurrentTextureIds[2]].width,
+                                      (GLfloat)textures[mCurrentTextureIds[2]].height,
+                                      (GLfloat)textures[mCurrentTextureIds[3]].width,
+                                      (GLfloat)textures[mCurrentTextureIds[3]].height };
+            bool v = prg->maskUniformsValid;
+            const bool changed = !lean || UniformChanged(v, prg->lastMaskSize, size);
+            prg->maskUniformsValid = lean;
+            if (changed) {
+                glUniform2fv(prg->mask_size_location, 2, size);
+            }
         } else {
-            GLint width[2] = { textures[mCurrentTextureIds[2]].width, textures[mCurrentTextureIds[3]].width };
-            glUniform1iv(mCurrentShaderProgram->mask_width_location, 2, width);
-
-            GLint height[2] = { textures[mCurrentTextureIds[2]].height, textures[mCurrentTextureIds[3]].height };
-            glUniform1iv(mCurrentShaderProgram->mask_height_location, 2, height);
+            const GLint width[2] = { textures[mCurrentTextureIds[2]].width, textures[mCurrentTextureIds[3]].width };
+            const GLint height[2] = { textures[mCurrentTextureIds[2]].height, textures[mCurrentTextureIds[3]].height };
+            bool v1 = prg->maskUniformsValid, v2 = prg->maskUniformsValid;
+            const bool wChanged = !lean || UniformChanged(v1, prg->lastMaskWidth, width);
+            const bool hChanged = !lean || UniformChanged(v2, prg->lastMaskHeight, height);
+            prg->maskUniformsValid = lean;
+            if (wChanged) {
+                glUniform1iv(prg->mask_width_location, 2, width);
+            }
+            if (hChanged) {
+                glUniform1iv(prg->mask_height_location, 2, height);
+            }
         }
     }
 }
 
 void GfxRenderingAPIOGL::UnloadShader(ShaderProgram* old_prg) {
+    if (mLeanGLState >= 1) {
+        // The next LoadShader disables only what the new program does not use.
+        if (old_prg != nullptr && old_prg == mLastLoadedShader) {
+            mLastLoadedShader = nullptr;
+        }
+        return;
+    }
     if (old_prg != nullptr && old_prg == mLastLoadedShader) {
         for (unsigned int i = 0; i < old_prg->numAttribs; i++) {
             if (old_prg->attribLocations[i] >= 0) {
@@ -189,13 +390,85 @@ void GfxRenderingAPIOGL::UnloadShader(ShaderProgram* old_prg) {
     }
 }
 
+// Mode >= 1: bring the context's attribute arrays to what `prg` needs, touching only what differs.
+// The layout is the same as VertexArraySetAttribs'; programs with the same attribute sizes share
+// pointers, and most consecutive programs enable the same locations.
+void GfxRenderingAPIOGL::SetVertexAttribsLean(ShaderProgram* prg) {
+    // Mode 3 sources vertices from the interpreter's own array; before its first draw the address
+    // is not known yet, and DrawTriangles re-applies the attributes once it is.
+    const bool client = mLeanGLState >= 3 && mClientVertexBase != nullptr;
+    BindArrayBuffer(client ? 0 : mOpenglVbo);
+    const uintptr_t base = client ? (uintptr_t)mClientVertexBase : 0;
+    const uint16_t stride = (uint16_t)(prg->numFloats * sizeof(float));
+    uint32_t want = 0;
+    size_t pos = 0;
+    for (int i = 0; i < prg->numAttribs; i++) {
+        const GLint loc = prg->attribLocations[i];
+        const uintptr_t pointer = base + pos * sizeof(float);
+        if (loc >= 0 && loc < kMaxShadowAttribs) {
+            want |= 1u << loc;
+            AttribPointer& p = mAttribPointers[loc];
+            if (!p.valid || p.size != prg->attribSizes[i] || p.stride != stride || p.buffer != mBoundArrayBuffer ||
+                p.pointer != pointer) {
+                glVertexAttribPointer(loc, prg->attribSizes[i], GL_FLOAT, GL_FALSE, stride, (void*)pointer);
+                p = { true, prg->attribSizes[i], stride, mBoundArrayBuffer, pointer };
+            }
+        } else if (loc >= 0) {
+            // Beyond the shadow; never expected, but correct if it happens.
+            glEnableVertexAttribArray(loc);
+            glVertexAttribPointer(loc, prg->attribSizes[i], GL_FLOAT, GL_FALSE, stride, (void*)pointer);
+        }
+        pos += prg->attribSizes[i];
+    }
+    for (uint32_t on = want & ~mAttribEnabled; on != 0; on &= on - 1) {
+        glEnableVertexAttribArray(__builtin_ctz(on));
+    }
+    for (uint32_t off = mAttribEnabled & ~want; off != 0; off &= off - 1) {
+        glDisableVertexAttribArray(__builtin_ctz(off));
+    }
+    mAttribEnabled = want;
+}
+
+// The shadow no longer describes the context. With disableAll the arrays are put in a known state
+// (all disabled) and the program in use re-applied; without it the caller has already left every
+// array this backend enabled disabled.
+void GfxRenderingAPIOGL::BindArrayBuffer(GLuint buffer) {
+    if (!mBoundArrayBufferKnown || mBoundArrayBuffer != buffer) {
+        glBindBuffer(GL_ARRAY_BUFFER, buffer);
+        mBoundArrayBuffer = buffer;
+        mBoundArrayBufferKnown = true;
+    }
+}
+
+void GfxRenderingAPIOGL::ForgetVertexAttribs(bool disableAll) {
+    for (auto& p : mAttribPointers) {
+        p.valid = false;
+    }
+    mAttribEnabled = 0;
+    mBoundArrayBufferKnown = false;
+    if (disableAll) {
+        // Modes 0-2 draw from the VBO and mode 0 never binds it itself.
+        BindArrayBuffer(mOpenglVbo);
+        for (int i = 0; i < std::min(mMaxVertexAttribs, (int)kMaxShadowAttribs); i++) {
+            glDisableVertexAttribArray(i);
+        }
+        if (mLastLoadedShader != nullptr) {
+            SetVertexAttribsLean(mLastLoadedShader);
+        }
+    }
+}
+
 void GfxRenderingAPIOGL::LoadShader(ShaderProgram* new_prg) {
     BENCH_COUNT(BENCH_SHADER_LOADS, 1);
     // if (!new_prg) return;
     mCurrentShaderProgram = new_prg;
     if (new_prg != mLastLoadedShader) {
         glUseProgram(new_prg->openglProgramId);
-        VertexArraySetAttribs(new_prg);
+        if (mLeanGLState >= 1) {
+            SetVertexAttribsLean(new_prg);
+        } else {
+            VertexArraySetAttribs(new_prg);
+        }
         mLastLoadedShader = new_prg;
     }
     SetUniforms(new_prg);
@@ -793,6 +1066,7 @@ void GfxRenderingAPIOGL::ClearShaderCache() {
     mCurrentShaderProgram = nullptr;
     mLastLoadedShader = nullptr;
     glUseProgram(0);
+    ForgetVertexAttribs(false);
 }
 
 struct ShaderProgram* GfxRenderingAPIOGL::LookupShader(uint64_t shader_id0, uint32_t shader_id1) {
@@ -971,7 +1245,20 @@ void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size
     // Four times worse. Leave it alone unless you have re-measured on the target driver.
     // See docs/pyra/05-phase0-device-measurements.md and docs/pyra/08-optimisation-opportunities.md
     // section 8.6.
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * buf_vbo_len, buf_vbo, GL_STREAM_DRAW);
+    if (mLeanGLState < 3) {
+        BENCH_COUNT(BENCH_VBO_UPLOADS, 1);
+        BENCH_COUNT(BENCH_VBO_BYTES, sizeof(float) * buf_vbo_len);
+    }
+    if (mLeanGLState >= 3) {
+        // Client-side arrays: the driver copies the vertices at the draw, from the interpreter's
+        // array, which does not move - so after the first draw the pointers never need resetting.
+        if (mClientVertexBase != buf_vbo) {
+            mClientVertexBase = buf_vbo;
+        }
+        SetVertexAttribsLean(mCurrentShaderProgram);
+    } else {
+        glBufferData(GL_ARRAY_BUFFER, sizeof(float) * buf_vbo_len, buf_vbo, GL_STREAM_DRAW);
+    }
     glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
 }
 
@@ -982,6 +1269,7 @@ void GfxRenderingAPIOGL::Init() {
 
     glGenBuffers(1, &mOpenglVbo);
     glBindBuffer(GL_ARRAY_BUFFER, mOpenglVbo);
+    glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &mMaxVertexAttribs);
 
 #if defined(__APPLE__) || (defined(USE_OPENGLES) && !defined(USE_OPENGLES2))
     // GLES 2.0 has no core VAOs. None is needed: the attribute pointers are
@@ -1029,6 +1317,15 @@ void GfxRenderingAPIOGL::OnResize() {
 
 void GfxRenderingAPIOGL::StartFrame() {
     mFrameCount++;
+    const int lean = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanGLState", 0);
+    // Re-establish the attribute shadow every frame rather than trust that nothing else in the
+    // context (ImGui draws between frames) left the arrays exactly as it found them; and on any
+    // change of mode, since mode 0 does not maintain the shadow.
+    if (lean >= 1 || lean != mLeanGLState) {
+        mLeanGLState = lean;
+        ForgetVertexAttribs(true);
+    }
+    mLeanGLState = lean;
 }
 
 void GfxRenderingAPIOGL::DiscardDepthStencil() {
@@ -1252,6 +1549,8 @@ void GfxRenderingAPIOGL::BlitFramebufferAsQuad(GLuint dstFbo, GLuint srcTex, flo
     glUniform1i(mBlitTexLocation, 0);
 
     glBindBuffer(GL_ARRAY_BUFFER, mOpenglVbo);
+    BENCH_COUNT(BENCH_VBO_UPLOADS, 1);
+    BENCH_COUNT(BENCH_VBO_BYTES, sizeof(quad));
     glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STREAM_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void*)0);
@@ -1264,6 +1563,11 @@ void GfxRenderingAPIOGL::BlitFramebufferAsQuad(GLuint dstFbo, GLuint srcTex, flo
     glDisableVertexAttribArray(1);
 
     // Every piece of GL state this renderer caches has just been invalidated.
+    mAttribEnabled &= ~3u;
+    mAttribPointers[0].valid = false;
+    mAttribPointers[1].valid = false;
+    mBoundArrayBuffer = mOpenglVbo;
+    mBoundArrayBufferKnown = true;
     mLastLoadedShader = nullptr;
     mLastActiveTexture = -1;
     mLastBlendEnabled = -1;

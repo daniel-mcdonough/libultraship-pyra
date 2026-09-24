@@ -64,6 +64,20 @@ struct ShaderProgram {
     // Which of the two uniform layouts this program was compiled with. Held per program rather
     // than read from the CVar at draw time so that a program always outlives its own layout.
     bool floatTexSize;
+
+    // gSettings.LeanGLState >= 2: the values this program's uniforms last received, so that a
+    // draw which would send the same values again sends nothing. Uniform values live in the
+    // program object and only this backend writes them, so the shadow cannot go stale.
+    bool texUniformsValid = false;
+    bool maskUniformsValid = false;
+    bool frameUniformsValid = false;
+    GLint lastFiltering[2] = {};
+    GLfloat lastTexSize[4] = {};
+    GLint lastTexWidth[2] = {}, lastTexHeight[2] = {};
+    GLfloat lastMaskSize[4] = {};
+    GLint lastMaskWidth[2] = {}, lastMaskHeight[2] = {};
+    int lastFrameCount = 0;
+    float lastNoiseScale = 0.0f;
 };
 
 struct FramebufferOGL {
@@ -133,6 +147,35 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
     void SetUniforms(ShaderProgram* prg) const;
     std::string BuildFsShader(const CCFeatures& cc_features, int shaderOpts);
     void SetPerDrawUniforms();
+    void SetVertexAttribsLean(ShaderProgram* prg);
+    void ForgetVertexAttribs(bool disableAll);
+    void BindArrayBuffer(GLuint buffer);
+
+    // gSettings.LeanGLState (report 8 §8.24), read once per frame. 1: vertex attribute arrays are
+    // enabled, disabled and re-pointed only where the new program differs from what is already
+    // set, instead of all disabled on every shader unload and all re-specified on every load.
+    // 2: also skip uniform uploads that would resend a program's current values.
+    // 3: also draw from client-side vertex arrays instead of a glBufferData per draw.
+    int mLeanGLState = 0;
+    // What the context's vertex attribute arrays are known to hold, for mode >= 1. GLES 2 has no
+    // VAOs, so this is global context state; anything else that touches it must call
+    // ForgetVertexAttribs, and StartFrame re-establishes it from nothing every frame.
+    struct AttribPointer {
+        bool valid = false;
+        uint8_t size = 0;
+        uint16_t stride = 0;
+        GLuint buffer = 0;
+        uintptr_t pointer = 0; // an offset into `buffer`, or an address when `buffer` is 0
+    };
+    static constexpr int kMaxShadowAttribs = 16;
+    AttribPointer mAttribPointers[kMaxShadowAttribs];
+    uint32_t mAttribEnabled = 0;
+    int mMaxVertexAttribs = 8;
+    // The GL_ARRAY_BUFFER binding as this backend last set it, and for mode 3 the address the
+    // interpreter's vertex buffer lives at (it is allocated once and never moves).
+    GLuint mBoundArrayBuffer = 0;
+    bool mBoundArrayBufferKnown = false;
+    const float* mClientVertexBase = nullptr;
 
     std::vector<TextureInfo> textures;
     GLuint mCurrentTextureIds[SHADER_MAX_TEXTURES];
