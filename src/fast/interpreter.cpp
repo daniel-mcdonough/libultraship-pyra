@@ -3086,9 +3086,10 @@ bool gfx_vtx_handler_f3d(F3DGfx** cmd0) {
 //   3  2, plus G_SETTIMG's "__OTR__" path lookups cached by the string's address, verified by
 //      comparing the whole string so a reused buffer holding another path cannot hit.
 // Mode 2 returns exactly what the manager would: the cache is flushed whenever the manager's cache
-// generation (any insert, erase or alt-asset toggle) or the archive manager's generation (any change
-// to the hash -> path table) moves, so it only ever answers while the manager's state is identical
-// to when the entry was filled. Read once per frame in StartFrame - a CVar lookup is itself a
+// generation (an erase, the alt-asset toggle, or a new alt/ asset - see GetCacheGeneration) or the
+// archive manager's generation (any change to the hash -> path table) moves, so it only answers
+// while nothing that could change a cached answer has happened since it was filled. Loading other
+// new assets, which SoH does lazily during play, leaves it alone. Read once per frame in StartFrame - a CVar lookup is itself a
 // string hash.
 static int sResLookupMode = 0;
 static std::shared_ptr<Ship::ResourceManager> sLookupRm;
@@ -3112,6 +3113,7 @@ static void ValidateLookupCache() {
     const uint32_t rmGen = sLookupRm->GetCacheGeneration();
     const uint32_t amGen = sLookupAm->GetGeneration();
     if (rmGen != sLookupCache.rmGeneration || amGen != sLookupCache.amGeneration) {
+        BENCH_COUNT(BENCH_LOOKUP_FLUSH, 1);
         sLookupCache.textures.clear();
         sLookupCache.rawPointers.clear();
         sLookupCache.texturesByPath.clear();
@@ -3127,8 +3129,10 @@ static void* LookupResourceRawPointer(uint64_t hash) {
     ValidateLookupCache();
     auto it = sLookupCache.rawPointers.find(hash);
     if (it != sLookupCache.rawPointers.end()) {
+        BENCH_COUNT(BENCH_LOOKUP_HIT, 1);
         return it->second;
     }
+    BENCH_COUNT(BENCH_LOOKUP_MISS, 1);
     void* ptr = sLookupRm->GetResourceRawPointer(hash);
     if (ptr != nullptr) {
         sLookupCache.rawPointers.emplace(hash, ptr);
@@ -3496,8 +3500,10 @@ bool gfx_set_timg_handler_rdp(F3DGfx** cmd0) {
                 ValidateLookupCache();
                 auto it = sLookupCache.texturesByPath.find(imgData);
                 if (it != sLookupCache.texturesByPath.end() && it->second.first == imgData) {
+                    BENCH_COUNT(BENCH_LOOKUP_HIT, 1);
                     tex = it->second.second;
                 } else {
+                    BENCH_COUNT(BENCH_LOOKUP_MISS, 1);
                     tex = std::static_pointer_cast<Fast::Texture>(sLookupRm->LoadResourceProcess(imgData));
                     if (tex != nullptr) {
                         sLookupCache.texturesByPath[imgData] = { std::string(imgData), tex };
@@ -3543,9 +3549,11 @@ bool gfx_set_timg_otr_hash_handler_custom(F3DGfx** cmd0) {
         ValidateLookupCache();
         auto it = sLookupCache.textures.find(hash);
         if (it != sLookupCache.textures.end()) {
+            BENCH_COUNT(BENCH_LOOKUP_HIT, 1);
             fileName = it->second.fileName;
             texture = it->second.texture;
         } else {
+            BENCH_COUNT(BENCH_LOOKUP_MISS, 1);
             fileName = sLookupAm->HashToCString(hash);
             if (fileName != nullptr) {
                 texture = std::static_pointer_cast<Fast::Texture>(sLookupRm->LoadResourceProcess(fileName));

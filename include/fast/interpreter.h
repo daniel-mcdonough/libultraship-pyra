@@ -150,6 +150,11 @@ enum BenchCounter {
     // ResourceManager::LoadResourceProcess entries inside the timed window only. Set against the
     // whole-period res_loads, it splits the interpreter's lookups from the game's.
     BENCH_RES_LOADS_WINDOW,
+    // gSettings.LeanResLookup >= 2: lookups answered by the front cache, lookups that fell through
+    // to the manager, and whole-cache flushes (a generation moved).
+    BENCH_LOOKUP_HIT,
+    BENCH_LOOKUP_MISS,
+    BENCH_LOOKUP_FLUSH,
     BENCH_COUNTER_COUNT
 };
 extern "C" uint32_t gBenchCounters[BENCH_COUNTER_COUNT];

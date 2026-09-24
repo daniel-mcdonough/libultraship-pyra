@@ -106,9 +106,10 @@ class ResourceManager {
     bool OtrSignatureCheck(const char* fileName);
     bool IsAltAssetsEnabled();
     void SetAltAssetsEnabled(bool isEnabled);
-    // Bumped on every change to the resource cache and on the alt-asset toggle: anything that
-    // could change what a lookup returns. A caller may cache lookup results for as long as this
-    // (and the ArchiveManager's generation) is unchanged.
+    // Bumped by anything that could change what an earlier successful lookup returns: an erase,
+    // the alt-asset toggle, or a newly loaded alt/ asset (which overrides its base). Loading any
+    // other new asset does not bump it. A caller may cache successful lookup results for as long
+    // as this (and the ArchiveManager's generation) is unchanged.
     uint32_t GetCacheGeneration() const {
         return mCacheGeneration.load(std::memory_order_acquire);
     }
