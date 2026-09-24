@@ -13,7 +13,7 @@
 namespace Ship {
 
 // What is being looked up. Each kind nests and is counted on its own.
-enum BenchLookupKind { BENCH_LOOKUP_RESOURCE, BENCH_LOOKUP_CVAR, BENCH_LOOKUP_KINDS };
+enum BenchLookupKind { BENCH_LOOKUP_RESOURCE, BENCH_LOOKUP_CVAR, BENCH_LOOKUP_CVAR_WRITE, BENCH_LOOKUP_KINDS };
 
 struct BenchLookupScope {
     BenchLookupScope(const char* entry, void* caller, int kind = BENCH_LOOKUP_RESOURCE);
@@ -27,6 +27,8 @@ uint64_t BenchLookupsThisThread(int kind = BENCH_LOOKUP_RESOURCE);
 // path, largest first, per period.
 void BenchLookupSitesBegin();
 void BenchLookupSitesEnd(const char* path, double periods);
+// CVar writes (ConsoleVariable.cpp), cumulative.
+extern uint64_t gBenchCVarChanges;
 
 } // namespace Ship
 
@@ -34,7 +36,10 @@ void BenchLookupSitesEnd(const char* path, double periods);
     const Ship::BenchLookupScope benchLookupScope_((entry), __builtin_return_address(0))
 #define BENCH_CVAR_SCOPE(entry) \
     const Ship::BenchLookupScope benchLookupScope_((entry), __builtin_return_address(0), Ship::BENCH_LOOKUP_CVAR)
+#define BENCH_CVAR_WRITE_SCOPE(entry) \
+    const Ship::BenchLookupScope benchLookupScope_((entry), __builtin_return_address(0), Ship::BENCH_LOOKUP_CVAR_WRITE)
 #else
+#define BENCH_CVAR_WRITE_SCOPE(entry) ((void)0)
 #define BENCH_LOOKUP_SCOPE(entry) ((void)0)
 #define BENCH_CVAR_SCOPE(entry) ((void)0)
 #endif

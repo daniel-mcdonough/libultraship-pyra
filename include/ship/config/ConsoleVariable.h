@@ -64,6 +64,22 @@ class ConsoleVariable {
     void LoadLegacy();
 
   private:
-    std::unordered_map<std::string, std::shared_ptr<CVar>> mVariables;
+    // Transparent, so that a lookup by const char* need not build a std::string key (§8.31).
+    // std::hash<std::string_view> is the hash std::hash<std::string> uses, so the table is the same.
+    struct NameHash {
+        using is_transparent = void;
+        size_t operator()(std::string_view name) const {
+            return std::hash<std::string_view>{}(name);
+        }
+    };
+    std::unordered_map<std::string, std::shared_ptr<CVar>, NameHash, std::equal_to<>> mVariables;
+
+    // gSettings.LeanCVar (§8.31): 0 the original lookup, which builds a std::string key and copies a
+    // shared_ptr per read; 1 a transparent find returning a raw pointer, the same answer without
+    // either; 2 (benchmark builds) a per-thread memo on the name pointer, a probe only - a pointer
+    // can later hold a different name. Read when it is set, and on Load.
+    int mLeanCVar = 0;
+    CVar* Find(const char* name);
+    void Changed(const char* name, bool structural);
 };
 } // namespace Ship

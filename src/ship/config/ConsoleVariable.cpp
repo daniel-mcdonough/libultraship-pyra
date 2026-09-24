@@ -1,6 +1,8 @@
 #include "ship/resource/BenchLookup.h"
 #include "ship/config/ConsoleVariable.h"
 
+#include <atomic>
+#include <cstring>
 #include <functional>
 #include "ship/utils/filesystemtools/DiskFile.h"
 #include "ship/utils/Utils.h"
@@ -21,13 +23,80 @@ ConsoleVariable::~ConsoleVariable() {
     SPDLOG_TRACE("destruct console variables");
 }
 
+namespace {
+// Bumped by anything that can add, remove or reload an entry, so a memoised answer (null included)
+// is never older than the table. Values change in place, behind the same pointer, so rewriting an
+// existing variable leaves it alone - GuiWindow::SyncVisibilityConsoleVariable rewrites one every
+// frame (§8.31).
+std::atomic<uint32_t> gCVarGeneration{ 1 };
+} // namespace
+
+#ifdef SOH_BENCHMARK
+// CVar writes, cumulative, whether or not they added an entry.
+uint64_t gBenchCVarChanges = 0;
+#endif
+
+void ConsoleVariable::Changed(const char* name, bool structural) {
+    if (structural) {
+        gCVarGeneration.fetch_add(1, std::memory_order_relaxed);
+    }
+#ifdef SOH_BENCHMARK
+    gBenchCVarChanges++;
+#endif
+    if (name == nullptr || strcmp(name, "gSettings.LeanCVar") == 0) {
+        auto it = mVariables.find(std::string_view("gSettings.LeanCVar"));
+        mLeanCVar = it != mVariables.end() && it->second->Type == ConsoleVariableType::Integer ? it->second->Integer : 0;
+    }
+}
+
+CVar* ConsoleVariable::Find(const char* name) {
+#ifdef SOH_BENCHMARK
+    if (mLeanCVar == 2) {
+        struct Memo {
+            uint32_t generation = 0;
+            std::unordered_map<const char*, CVar*> byName;
+        };
+        thread_local Memo memo;
+        const uint32_t generation = gCVarGeneration.load(std::memory_order_relaxed);
+        if (memo.generation != generation) {
+            memo.byName.clear();
+            memo.generation = generation;
+        }
+        auto hit = memo.byName.find(name);
+        if (hit != memo.byName.end()) {
+            return hit->second;
+        }
+        auto it = mVariables.find(std::string_view(name));
+        CVar* variable = it != mVariables.end() ? it->second.get() : nullptr;
+        memo.byName.emplace(name, variable);
+        return variable;
+    }
+#endif
+    auto it = mVariables.find(std::string_view(name));
+    return it != mVariables.end() ? it->second.get() : nullptr;
+}
+
 std::shared_ptr<CVar> ConsoleVariable::Get(const char* name) {
     BENCH_CVAR_SCOPE("CV::Get");
-    auto it = mVariables.find(name);
+    if (mLeanCVar != 0) {
+        auto it = mVariables.find(std::string_view(name));
+        return it != mVariables.end() ? it->second : nullptr;
+    }
+    auto it = mVariables.find(std::string(name));
     return it != mVariables.end() ? it->second : nullptr;
 }
 
 int32_t ConsoleVariable::GetInteger(const char* name, int32_t defaultValue) {
+    if (mLeanCVar != 0) {
+        const CVar* variable = Find(name);
+
+        if (variable != nullptr && variable->Type == ConsoleVariableType::Integer) {
+            return variable->Integer;
+        }
+
+        return defaultValue;
+    }
+
     auto variable = Get(name);
 
     if (variable != nullptr && variable->Type == ConsoleVariableType::Integer) {
@@ -38,6 +107,16 @@ int32_t ConsoleVariable::GetInteger(const char* name, int32_t defaultValue) {
 }
 
 float ConsoleVariable::GetFloat(const char* name, float defaultValue) {
+    if (mLeanCVar != 0) {
+        const CVar* variable = Find(name);
+
+        if (variable != nullptr && variable->Type == ConsoleVariableType::Float) {
+            return variable->Float;
+        }
+
+        return defaultValue;
+    }
+
     auto variable = Get(name);
 
     if (variable != nullptr && variable->Type == ConsoleVariableType::Float) {
@@ -48,6 +127,16 @@ float ConsoleVariable::GetFloat(const char* name, float defaultValue) {
 }
 
 const char* ConsoleVariable::GetString(const char* name, const char* defaultValue) {
+    if (mLeanCVar != 0) {
+        const CVar* variable = Find(name);
+
+        if (variable != nullptr && variable->Type == ConsoleVariableType::String) {
+            return variable->String;
+        }
+
+        return defaultValue;
+    }
+
     auto variable = Get(name);
 
     if (variable != nullptr && variable->Type == ConsoleVariableType::String) {
@@ -58,6 +147,23 @@ const char* ConsoleVariable::GetString(const char* name, const char* defaultValu
 }
 
 Color_RGBA8 ConsoleVariable::GetColor(const char* name, Color_RGBA8 defaultValue) {
+    if (mLeanCVar != 0) {
+        const CVar* variable = Find(name);
+
+        if (variable != nullptr && variable->Type == ConsoleVariableType::Color) {
+            return variable->Color;
+        } else if (variable != nullptr && variable->Type == ConsoleVariableType::Color24) {
+            Color_RGBA8 temp;
+            temp.r = variable->Color24.r;
+            temp.g = variable->Color24.g;
+            temp.b = variable->Color24.b;
+            temp.a = 255;
+            return temp;
+        }
+
+        return defaultValue;
+    }
+
     auto variable = Get(name);
 
     if (variable != nullptr && variable->Type == ConsoleVariableType::Color) {
@@ -75,6 +181,22 @@ Color_RGBA8 ConsoleVariable::GetColor(const char* name, Color_RGBA8 defaultValue
 }
 
 Color_RGB8 ConsoleVariable::GetColor24(const char* name, Color_RGB8 defaultValue) {
+    if (mLeanCVar != 0) {
+        const CVar* variable = Find(name);
+
+        if (variable != nullptr && variable->Type == ConsoleVariableType::Color24) {
+            return variable->Color24;
+        } else if (variable != nullptr && variable->Type == ConsoleVariableType::Color) {
+            Color_RGB8 temp;
+            temp.r = variable->Color.r;
+            temp.g = variable->Color.g;
+            temp.b = variable->Color.b;
+            return temp;
+        }
+
+        return defaultValue;
+    }
+
     auto variable = Get(name);
 
     if (variable != nullptr && variable->Type == ConsoleVariableType::Color24) {
@@ -91,28 +213,36 @@ Color_RGB8 ConsoleVariable::GetColor24(const char* name, Color_RGB8 defaultValue
 }
 
 void ConsoleVariable::SetInteger(const char* name, int32_t value) {
+    BENCH_CVAR_WRITE_SCOPE("CV::SetInteger");
     auto& variable = mVariables[name];
-    if (variable == nullptr) {
+    const bool added = variable == nullptr;
+    if (added) {
         variable = std::make_shared<CVar>();
     }
 
     variable->Type = ConsoleVariableType::Integer;
     variable->Integer = value;
+    Changed(name, added);
 }
 
 void ConsoleVariable::SetFloat(const char* name, float value) {
+    BENCH_CVAR_WRITE_SCOPE("CV::SetFloat");
     auto& variable = mVariables[name];
-    if (variable == nullptr) {
+    const bool added = variable == nullptr;
+    if (added) {
         variable = std::make_shared<CVar>();
     }
 
     variable->Type = ConsoleVariableType::Float;
     variable->Float = value;
+    Changed(name, added);
 }
 
 void ConsoleVariable::SetString(const char* name, const char* value) {
+    BENCH_CVAR_WRITE_SCOPE("CV::SetString");
     auto& variable = mVariables[name];
-    if (variable == nullptr) {
+    const bool added = variable == nullptr;
+    if (added) {
         variable = std::make_shared<CVar>();
     }
 
@@ -121,26 +251,33 @@ void ConsoleVariable::SetString(const char* name, const char* value) {
         free(variable->String);
     }
     variable->String = strdup(value);
+    Changed(name, added);
 }
 
 void ConsoleVariable::SetColor(const char* name, Color_RGBA8 value) {
+    BENCH_CVAR_WRITE_SCOPE("CV::SetColor");
     auto& variable = mVariables[name];
-    if (!variable) {
+    const bool added = variable == nullptr;
+    if (added) {
         variable = std::make_shared<CVar>();
     }
 
     variable->Type = ConsoleVariableType::Color;
     variable->Color = value;
+    Changed(name, added);
 }
 
 void ConsoleVariable::SetColor24(const char* name, Color_RGB8 value) {
+    BENCH_CVAR_WRITE_SCOPE("CV::SetColor24");
     auto& variable = mVariables[name];
-    if (!variable) {
+    const bool added = variable == nullptr;
+    if (added) {
         variable = std::make_shared<CVar>();
     }
 
     variable->Type = ConsoleVariableType::Color24;
     variable->Color24 = value;
+    Changed(name, added);
 }
 
 void ConsoleVariable::RegisterInteger(const char* name, int32_t defaultValue) {
@@ -174,6 +311,7 @@ void ConsoleVariable::RegisterColor24(const char* name, Color_RGB8 defaultValue)
 }
 
 void ConsoleVariable::ClearVariable(const char* name) {
+    BENCH_CVAR_WRITE_SCOPE("CV::ClearVariable");
     std::shared_ptr<Config> conf = Context::GetInstance()->GetConfig();
     auto var = Get(name);
     if (var != nullptr) {
@@ -201,6 +339,7 @@ void ConsoleVariable::ClearVariable(const char* name) {
     }
     mVariables.erase(name);
     conf->Erase(StringHelper::Sprintf("CVars.%s", name));
+    Changed(name, true);
 }
 
 void ConsoleVariable::ClearBlock(const char* name) {
@@ -210,6 +349,7 @@ void ConsoleVariable::ClearBlock(const char* name) {
 }
 
 void ConsoleVariable::CopyVariable(const char* from, const char* to) {
+    BENCH_CVAR_WRITE_SCOPE("CV::CopyVariable");
     auto& variableFrom = mVariables[from];
     if (!variableFrom) {
         return;
@@ -240,6 +380,7 @@ void ConsoleVariable::CopyVariable(const char* from, const char* to) {
             variableTo->Color24 = variableFrom->Color24;
             break;
     }
+    Changed(to, true);
 }
 
 void ConsoleVariable::Save() {
@@ -279,6 +420,7 @@ void ConsoleVariable::Save() {
 }
 
 void ConsoleVariable::Load() {
+    BENCH_CVAR_WRITE_SCOPE("CV::Load");
     std::shared_ptr<Config> conf = Context::GetInstance()->GetConfig();
     conf->Reload();
     if (!mVariables.empty()) {
@@ -288,6 +430,7 @@ void ConsoleVariable::Load() {
     LoadFromPath("", conf->GetNestedJson()["CVars"].items());
 
     LoadLegacy();
+    Changed(nullptr, true);
 }
 
 void ConsoleVariable::LoadFromPath(
