@@ -3080,7 +3080,7 @@ bool gfx_vtx_handler_f3d(F3DGfx** cmd0) {
 // sub-lists by hash, and every execution resolves the hash through the resource manager again -
 // ~940 lookups per frame at the Market, each building strings, taking the manager's mutex three
 // times and missing an "alt/" lookup first.
-//   0  as upstream.
+//   0  as upstream. Set this to turn the cache off.
 //   1  texture lookups fetch Context/ResourceManager/ArchiveManager once and HashToCString once.
 //   2  texture, vertex and display-list lookups are cached by hash in front of the manager.
 //   3  2, plus G_SETTIMG's "__OTR__" path lookups cached by the string's address, verified by
@@ -3090,7 +3090,8 @@ bool gfx_vtx_handler_f3d(F3DGfx** cmd0) {
 // archive manager's generation (any change to the hash -> path table) moves, so it only answers
 // while nothing that could change a cached answer has happened since it was filled. Loading other
 // new assets, which SoH does lazily during play, leaves it alone. Read once per frame in StartFrame - a CVar lookup is itself a
-// string hash.
+// string hash. Default 3: -12% of the frozen Market frame, -11.7% of the render thread's CPU in
+// 17 minutes of real play with zero flushes and no visual change (report 8 §8.22, §8.23).
 static int sResLookupMode = 0;
 static std::shared_ptr<Ship::ResourceManager> sLookupRm;
 static std::shared_ptr<Ship::ArchiveManager> sLookupAm;
@@ -4453,7 +4454,7 @@ bool Interpreter::ViewportMatchesRendererResolution() {
 }
 
 void Interpreter::StartFrame() {
-    sResLookupMode = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanResLookup", 0);
+    sResLookupMode = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanResLookup", 3);
     if (sResLookupMode >= 2) {
         sLookupRm = Ship::Context::GetInstance()->GetResourceManager();
         sLookupAm = sLookupRm->GetArchiveManager();
