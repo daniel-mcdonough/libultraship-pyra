@@ -8,6 +8,7 @@
 #include <unordered_set>
 #include <stdint.h>
 #include <functional>
+#include <atomic>
 #include "ship/resource/File.h"
 #ifdef ENABLE_SCRIPTING
 #include "ship/security/Keystore.h"
@@ -193,6 +194,11 @@ class ArchiveManager {
      * @return C-string pointer, or nullptr if not found.
      */
     const char* HashToCString(uint64_t hash) const;
+    // Bumped whenever the hash -> path table changes, which is what invalidates a pointer returned
+    // by HashToCString. Lets a caller cache those pointers and know when it must stop.
+    uint32_t GetGeneration() const {
+        return mGeneration.load(std::memory_order_acquire);
+    }
 
     /**
      * @brief Returns true if the given game version is in the set of valid versions.
@@ -228,6 +234,7 @@ class ArchiveManager {
     void ResetVirtualFileSystem();
 
   private:
+    std::atomic<uint32_t> mGeneration{ 0 };
     std::vector<std::shared_ptr<Archive>> mArchives;
     std::vector<uint32_t> mGameVersions;
     std::unordered_set<uint32_t> mValidGameVersions;
