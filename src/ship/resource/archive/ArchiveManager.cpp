@@ -143,6 +143,7 @@ void ArchiveManager::ResetVirtualFileSystem() {
     mGameVersions.clear();
     mHashes.clear();
     mFileToArchive.clear();
+    mGeneration.fetch_add(1, std::memory_order_release);
     for (const auto& archive : archives) {
         archive->Unload();
         archive->Load();
@@ -156,6 +157,7 @@ bool ArchiveManager::WriteFile(std::shared_ptr<Archive> archive, const std::stri
         if (archive->WriteFile(filePath, data)) {
             auto hash = CRC64(filePath.c_str());
             mHashes[hash] = filePath;
+            mGeneration.fetch_add(1, std::memory_order_release);
             mFileToArchive[hash] = archive;
             return true; // Successfully wrote file
         }
@@ -279,6 +281,7 @@ std::shared_ptr<Archive> ArchiveManager::AddArchive(std::shared_ptr<Archive> arc
         mGameVersions.push_back(archive->GetGameVersion());
     }
     const auto fileList = archive->ListFiles();
+    mGeneration.fetch_add(1, std::memory_order_release);
     for (auto& [hash, filename] : *fileList.get()) {
         mHashes[hash] = filename;
         mFileToArchive[hash] = archive;

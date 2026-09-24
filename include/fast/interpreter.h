@@ -136,6 +136,20 @@ enum BenchCounter {
     BENCH_FB_READBACKS,
     BENCH_SHADER_LOADS,
     BENCH_FB_REALLOCS,
+    // Display-list commands that resolve an asset by hash through the resource manager, every
+    // time they execute (report 8 §8.21).
+    BENCH_TIMG_HASH,
+    BENCH_VTX_HASH,
+    BENCH_DL_HASH,
+    // The same three, resolved by path string instead of hash.
+    BENCH_TIMG_PATH,
+    BENCH_VTX_PATH,
+    BENCH_DL_PATH,
+    // G_SETTIMG whose address is an "__OTR__" path string, resolved through the manager by path.
+    BENCH_TIMG_SIG,
+    // ResourceManager::LoadResourceProcess entries inside the timed window only. Set against the
+    // whole-period res_loads, it splits the interpreter's lookups from the game's.
+    BENCH_RES_LOADS_WINDOW,
     BENCH_COUNTER_COUNT
 };
 extern "C" uint32_t gBenchCounters[BENCH_COUNTER_COUNT];

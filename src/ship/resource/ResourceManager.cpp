@@ -8,6 +8,9 @@
 #include "ship/utils/Utils.h"
 #include "ship/config/ConsoleVariable.h"
 #include "ship/Context.h"
+#ifdef SOH_BENCHMARK
+#include "fast/interpreter.h"
+#endif
 
 namespace Ship {
 
@@ -93,8 +96,20 @@ std::shared_ptr<File> ResourceManager::LoadFileProcess(const ResourceIdentifier&
     return file;
 }
 
+#ifdef SOH_BENCHMARK
+// Every entry into the synchronous load path, from anywhere - the interpreter's hash commands and
+// the game's own ResourceMgr_* calls alike. Cumulative, never reset: the benchmark diffs it across
+// a segment, so it covers the whole frame period and not just the timed window. Recursive entries
+// (the OTR-signature strip and the alt-asset attempt) count too, which is the point.
+uint64_t gBenchResourceLoads = 0;
+#endif
+
 std::shared_ptr<IResource> ResourceManager::LoadResourceProcess(const ResourceIdentifier& identifier, bool loadExact,
                                                                 std::shared_ptr<ResourceInitData> initData) {
+#ifdef SOH_BENCHMARK
+    gBenchResourceLoads++;
+    BENCH_COUNT(BENCH_RES_LOADS_WINDOW, 1);
+#endif
     // Check for and remove the OTR signature
     if (OtrSignatureCheck(identifier.Path.c_str())) {
         const auto newFilePath = identifier.Path.substr(7);
@@ -142,6 +157,7 @@ std::shared_ptr<IResource> ResourceManager::LoadResourceProcess(const ResourceId
     if (file == nullptr) {
         SPDLOG_TRACE("Failed to load resource file at path {}", identifier.Path);
         mResourceCache[identifier] = ResourceLoadError::NotFound;
+        mCacheGeneration.fetch_add(1, std::memory_order_release);
         return nullptr;
     }
 
@@ -168,6 +184,7 @@ std::shared_ptr<IResource> ResourceManager::LoadResourceProcess(const ResourceId
             mResourceCache[identifier] = ResourceLoadError::NotFound;
         }
     }
+    mCacheGeneration.fetch_add(1, std::memory_order_release);
 
     if (resource != nullptr) {
         SPDLOG_TRACE("Loaded Resource {} on ResourceManager", identifier.Path);
@@ -399,6 +416,7 @@ size_t ResourceManager::UnloadResource(const ResourceIdentifier& identifier) {
     if (mResourceCache.contains(identifier)) {
         const std::lock_guard<std::mutex> lock(mMutex);
         mResourceCache.erase(identifier);
+        mCacheGeneration.fetch_add(1, std::memory_order_release);
     }
 
     return ret;
@@ -441,6 +459,9 @@ bool ResourceManager::IsAltAssetsEnabled() {
 }
 
 void ResourceManager::SetAltAssetsEnabled(bool isEnabled) {
+    if (mAltAssetsEnabled != isEnabled) {
+        mCacheGeneration.fetch_add(1, std::memory_order_release);
+    }
     mAltAssetsEnabled = isEnabled;
 }
 

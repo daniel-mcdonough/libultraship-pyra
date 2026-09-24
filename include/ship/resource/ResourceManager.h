@@ -8,6 +8,7 @@
 #include <mutex>
 #include <queue>
 #include <variant>
+#include <atomic>
 #include "ship/resource/Resource.h"
 #include "ship/resource/ResourceLoader.h"
 #include "ship/resource/archive/Archive.h"
@@ -105,6 +106,12 @@ class ResourceManager {
     bool OtrSignatureCheck(const char* fileName);
     bool IsAltAssetsEnabled();
     void SetAltAssetsEnabled(bool isEnabled);
+    // Bumped on every change to the resource cache and on the alt-asset toggle: anything that
+    // could change what a lookup returns. A caller may cache lookup results for as long as this
+    // (and the ArchiveManager's generation) is unchanged.
+    uint32_t GetCacheGeneration() const {
+        return mCacheGeneration.load(std::memory_order_acquire);
+    }
     std::shared_ptr<File> LoadFileProcess(const ResourceIdentifier& identifier);
     std::shared_ptr<File> LoadFileProcess(const std::string& filePath);
 
@@ -139,6 +146,7 @@ class ResourceManager {
     std::shared_ptr<BS::thread_pool> mThreadPool;
     std::mutex mMutex;
     bool mAltAssetsEnabled = false;
+    std::atomic<uint32_t> mCacheGeneration{ 0 };
     // Private information for which owner and archive are default.
     uintptr_t mDefaultCacheOwner = 0;
     std::shared_ptr<Archive> mDefaultCacheArchive = nullptr;

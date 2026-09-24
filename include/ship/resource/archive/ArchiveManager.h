@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <stdint.h>
+#include <atomic>
 #include "ship/resource/File.h"
 
 namespace Ship {
@@ -42,6 +43,11 @@ class ArchiveManager {
     std::vector<uint32_t> GetGameVersions();
     const std::string* HashToString(uint64_t hash) const;
     const char* HashToCString(uint64_t hash) const;
+    // Bumped whenever the hash -> path table changes, which is what invalidates a pointer returned
+    // by HashToCString. Lets a caller cache those pointers and know when it must stop.
+    uint32_t GetGeneration() const {
+        return mGeneration.load(std::memory_order_acquire);
+    }
     bool IsGameVersionValid(uint32_t gameVersion);
 
   protected:
@@ -50,6 +56,7 @@ class ArchiveManager {
     void ResetVirtualFileSystem();
 
   private:
+    std::atomic<uint32_t> mGeneration{ 0 };
     std::vector<std::shared_ptr<Archive>> mArchives;
     std::vector<uint32_t> mGameVersions;
     std::unordered_set<uint32_t> mValidGameVersions;

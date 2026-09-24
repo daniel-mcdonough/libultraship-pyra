@@ -3076,7 +3076,68 @@ bool gfx_vtx_handler_f3d(F3DGfx** cmd0) {
     return false;
 }
 
+// gSettings.LeanResLookup (report 8 §8.21/§8.22). Display lists name textures, vertices and
+// sub-lists by hash, and every execution resolves the hash through the resource manager again -
+// ~940 lookups per frame at the Market, each building strings, taking the manager's mutex three
+// times and missing an "alt/" lookup first.
+//   0  as upstream.
+//   1  texture lookups fetch Context/ResourceManager/ArchiveManager once and HashToCString once.
+//   2  texture, vertex and display-list lookups are cached by hash in front of the manager.
+//   3  2, plus G_SETTIMG's "__OTR__" path lookups cached by the string's address, verified by
+//      comparing the whole string so a reused buffer holding another path cannot hit.
+// Mode 2 returns exactly what the manager would: the cache is flushed whenever the manager's cache
+// generation (any insert, erase or alt-asset toggle) or the archive manager's generation (any change
+// to the hash -> path table) moves, so it only ever answers while the manager's state is identical
+// to when the entry was filled. Read once per frame in StartFrame - a CVar lookup is itself a
+// string hash.
+static int sResLookupMode = 0;
+static std::shared_ptr<Ship::ResourceManager> sLookupRm;
+static std::shared_ptr<Ship::ArchiveManager> sLookupAm;
+
+struct TexLookup {
+    const char* fileName;
+    std::shared_ptr<Fast::Texture> texture;
+};
+static struct {
+    uint32_t rmGeneration = UINT32_MAX;
+    uint32_t amGeneration = UINT32_MAX;
+    std::unordered_map<uint64_t, TexLookup> textures;
+    std::unordered_map<uint64_t, void*> rawPointers;
+    std::unordered_map<const char*, std::pair<std::string, std::shared_ptr<Fast::Texture>>> texturesByPath;
+} sLookupCache;
+
+// Generations are read before the manager is consulted, so an insert racing a fill leaves the cache
+// tagged with the older generation and the next call flushes it.
+static void ValidateLookupCache() {
+    const uint32_t rmGen = sLookupRm->GetCacheGeneration();
+    const uint32_t amGen = sLookupAm->GetGeneration();
+    if (rmGen != sLookupCache.rmGeneration || amGen != sLookupCache.amGeneration) {
+        sLookupCache.textures.clear();
+        sLookupCache.rawPointers.clear();
+        sLookupCache.texturesByPath.clear();
+        sLookupCache.rmGeneration = rmGen;
+        sLookupCache.amGeneration = amGen;
+    }
+}
+
+static void* LookupResourceRawPointer(uint64_t hash) {
+    if (sResLookupMode < 2) {
+        return Ship::Context::GetInstance()->GetResourceManager()->GetResourceRawPointer(hash);
+    }
+    ValidateLookupCache();
+    auto it = sLookupCache.rawPointers.find(hash);
+    if (it != sLookupCache.rawPointers.end()) {
+        return it->second;
+    }
+    void* ptr = sLookupRm->GetResourceRawPointer(hash);
+    if (ptr != nullptr) {
+        sLookupCache.rawPointers.emplace(hash, ptr);
+    }
+    return ptr;
+}
+
 bool gfx_vtx_hash_handler_custom(F3DGfx** cmd0) {
+    BENCH_COUNT(BENCH_VTX_HASH, 1);
     Interpreter* gfx = mInstance.lock().get();
     // Offset added to the start of the vertices
     const uintptr_t offset = (*cmd0)->words.w1;
@@ -3093,7 +3154,7 @@ bool gfx_vtx_hash_handler_custom(F3DGfx** cmd0) {
         gfx->GfxSpVertex(C0(12, 8), C0(1, 7) - C0(12, 8), (F3DVtx*)offset);
         (*cmd0)++;
     } else {
-        F3DVtx* vtx = (F3DVtx*)Ship::Context::GetInstance()->GetResourceManager()->GetResourceRawPointer(hash);
+        F3DVtx* vtx = (F3DVtx*)LookupResourceRawPointer(hash);
 
         if (vtx != NULL) {
             vtx = (F3DVtx*)((char*)vtx + offset);
@@ -3112,6 +3173,7 @@ bool gfx_vtx_hash_handler_custom(F3DGfx** cmd0) {
 }
 
 bool gfx_vtx_otr_filepath_handler_custom(F3DGfx** cmd0) {
+    BENCH_COUNT(BENCH_VTX_PATH, 1);
     Interpreter* gfx = mInstance.lock().get();
     F3DGfx* cmd = *cmd0;
     char* fileName = (char*)cmd->words.w1;
@@ -3129,6 +3191,7 @@ bool gfx_vtx_otr_filepath_handler_custom(F3DGfx** cmd0) {
 }
 
 bool gfx_dl_otr_filepath_handler_custom(F3DGfx** cmd0) {
+    BENCH_COUNT(BENCH_DL_PATH, 1);
     F3DGfx* cmd = *cmd0;
     char* fileName = (char*)cmd->words.w1;
     F3DGfx* nDL =
@@ -3178,6 +3241,7 @@ bool gfx_dl_handler_common(F3DGfx** cmd0) {
 }
 
 bool gfx_dl_otr_hash_handler_custom(F3DGfx** cmd0) {
+    BENCH_COUNT(BENCH_DL_HASH, 1);
     F3DGfx* cmd = *cmd0;
     if (C0(16, 1) == 0) {
         // Push return address
@@ -3185,7 +3249,7 @@ bool gfx_dl_otr_hash_handler_custom(F3DGfx** cmd0) {
 
         uint64_t hash = ((uint64_t)(*cmd0)->words.w0 << 32) + (*cmd0)->words.w1;
 
-        F3DGfx* gfx = (F3DGfx*)Ship::Context::GetInstance()->GetResourceManager()->GetResourceRawPointer(hash);
+        F3DGfx* gfx = (F3DGfx*)LookupResourceRawPointer(hash);
 
         if (gfx != 0) {
             g_exec_stack.call(cmd, gfx);
@@ -3243,7 +3307,7 @@ bool gfx_branch_z_otr_handler_f3dex2(F3DGfx** cmd0) {
         (gfx->mRsp->extra_geometry_mode & G_EX_ALWAYS_EXECUTE_BRANCH) != 0) {
         uint64_t hash = ((uint64_t)(*cmd0)->words.w0 << 32) + (*cmd0)->words.w1;
 
-        F3DGfx* gfx = (F3DGfx*)Ship::Context::GetInstance()->GetResourceManager()->GetResourceRawPointer(hash);
+        F3DGfx* gfx = (F3DGfx*)LookupResourceRawPointer(hash);
 
         if (gfx != 0) {
             (*cmd0) = gfx;
@@ -3426,8 +3490,23 @@ bool gfx_set_timg_handler_rdp(F3DGfx** cmd0) {
 
     if ((i & 1) != 1) {
         if (gfx_check_image_signature(imgData) == 1) {
-            std::shared_ptr<Fast::Texture> tex = std::static_pointer_cast<Fast::Texture>(
-                Ship::Context::GetInstance()->GetResourceManager()->LoadResourceProcess(imgData));
+            BENCH_COUNT(BENCH_TIMG_SIG, 1);
+            std::shared_ptr<Fast::Texture> tex;
+            if (sResLookupMode >= 3) {
+                ValidateLookupCache();
+                auto it = sLookupCache.texturesByPath.find(imgData);
+                if (it != sLookupCache.texturesByPath.end() && it->second.first == imgData) {
+                    tex = it->second.second;
+                } else {
+                    tex = std::static_pointer_cast<Fast::Texture>(sLookupRm->LoadResourceProcess(imgData));
+                    if (tex != nullptr) {
+                        sLookupCache.texturesByPath[imgData] = { std::string(imgData), tex };
+                    }
+                }
+            } else {
+                tex = std::static_pointer_cast<Fast::Texture>(
+                    Ship::Context::GetInstance()->GetResourceManager()->LoadResourceProcess(imgData));
+            }
 
             if (tex == nullptr) {
                 (*cmd0)++;
@@ -3451,11 +3530,37 @@ bool gfx_set_timg_handler_rdp(F3DGfx** cmd0) {
 }
 
 bool gfx_set_timg_otr_hash_handler_custom(F3DGfx** cmd0) {
+    BENCH_COUNT(BENCH_TIMG_HASH, 1);
     uintptr_t addr = (*cmd0)->words.w1;
     (*cmd0)++;
     uint64_t hash = ((uint64_t)(*cmd0)->words.w0 << 32) + (uint64_t)(*cmd0)->words.w1;
 
-    const char* fileName = Ship::Context::GetInstance()->GetResourceManager()->GetArchiveManager()->HashToCString(hash);
+    std::shared_ptr<Ship::ResourceManager> leanRm;
+    const char* fileName;
+    std::shared_ptr<Fast::Texture> texture;
+    bool resolved = false;
+    if (sResLookupMode >= 2) {
+        ValidateLookupCache();
+        auto it = sLookupCache.textures.find(hash);
+        if (it != sLookupCache.textures.end()) {
+            fileName = it->second.fileName;
+            texture = it->second.texture;
+        } else {
+            fileName = sLookupAm->HashToCString(hash);
+            if (fileName != nullptr) {
+                texture = std::static_pointer_cast<Fast::Texture>(sLookupRm->LoadResourceProcess(fileName));
+                if (texture != nullptr) {
+                    sLookupCache.textures.emplace(hash, TexLookup{ fileName, texture });
+                }
+            }
+        }
+        resolved = true;
+    } else if (sResLookupMode == 1) {
+        leanRm = Ship::Context::GetInstance()->GetResourceManager();
+        fileName = leanRm->GetArchiveManager()->HashToCString(hash);
+    } else {
+        fileName = Ship::Context::GetInstance()->GetResourceManager()->GetArchiveManager()->HashToCString(hash);
+    }
     uint32_t texFlags = 0;
     RawTexMetadata rawTexMetadata = {};
 
@@ -3464,9 +3569,15 @@ bool gfx_set_timg_otr_hash_handler_custom(F3DGfx** cmd0) {
         return false;
     }
 
-    std::shared_ptr<Fast::Texture> texture =
-        std::static_pointer_cast<Fast::Texture>(Ship::Context::GetInstance()->GetResourceManager()->LoadResourceProcess(
-            Ship::Context::GetInstance()->GetResourceManager()->GetArchiveManager()->HashToCString(hash)));
+    if (resolved) {
+        // Mode 2 has already resolved it, from the cache or the manager.
+    } else if (sResLookupMode == 1) {
+        texture = std::static_pointer_cast<Fast::Texture>(leanRm->LoadResourceProcess(fileName));
+    } else {
+        texture = std::static_pointer_cast<Fast::Texture>(
+            Ship::Context::GetInstance()->GetResourceManager()->LoadResourceProcess(
+                Ship::Context::GetInstance()->GetResourceManager()->GetArchiveManager()->HashToCString(hash)));
+    }
     if (texture != nullptr) {
         texFlags = texture->Flags;
         rawTexMetadata.width = texture->Width;
@@ -3514,6 +3625,7 @@ bool gfx_set_timg_otr_hash_handler_custom(F3DGfx** cmd0) {
 }
 
 bool gfx_set_timg_otr_filepath_handler_custom(F3DGfx** cmd0) {
+    BENCH_COUNT(BENCH_TIMG_PATH, 1);
     F3DGfx* cmd = *cmd0;
     const char* fileName = (char*)cmd->words.w1;
 
@@ -4333,6 +4445,17 @@ bool Interpreter::ViewportMatchesRendererResolution() {
 }
 
 void Interpreter::StartFrame() {
+    sResLookupMode = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanResLookup", 0);
+    if (sResLookupMode >= 2) {
+        sLookupRm = Ship::Context::GetInstance()->GetResourceManager();
+        sLookupAm = sLookupRm->GetArchiveManager();
+    } else {
+        // Not held while unused: the entries keep textures alive.
+        sLookupCache.textures.clear();
+        sLookupCache.rawPointers.clear();
+        sLookupCache.texturesByPath.clear();
+        sLookupCache.rmGeneration = sLookupCache.amGeneration = UINT32_MAX;
+    }
     mWapi->GetDimensions(&mGfxCurrentWindowDimensions.width, &mGfxCurrentWindowDimensions.height, &mCurWindowPosX,
                          &mCurWindowPosY);
     if (mCurDimensions.height == 0) {
