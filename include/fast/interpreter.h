@@ -185,10 +185,6 @@ enum BenchCounter {
     BENCH_VTX_TEXGEN,
     BENCH_VTX_FOG,
     BENCH_LIGHTS_RECALC,
-    // gSettings.LeanLight=2 (§8.28): vertices whose colour the batched lighting pass recomputed
-    // alongside the original loop, and how many of those came out different in any channel.
-    BENCH_LIGHT_CHECKED,
-    BENCH_LIGHT_MISMATCH,
     BENCH_COUNTER_COUNT
 };
 extern "C" uint32_t gBenchCounters[BENCH_COUNTER_COUNT];
