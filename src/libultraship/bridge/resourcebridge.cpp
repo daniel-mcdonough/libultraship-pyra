@@ -6,12 +6,15 @@
 #include "fast/resource/type/Texture.h"
 #include "ship/utils/StrHash64.h"
 #include "ship/window/Window.h"
+#include "ship/resource/BenchLookup.h"
 
 std::shared_ptr<Ship::IResource> ResourceLoad(const char* name) {
+    BENCH_LOOKUP_SCOPE("ResourceLoad");
     return Ship::Context::GetRawInstance()->GetResourceManager()->LoadResource(name);
 }
 
 std::shared_ptr<Ship::IResource> ResourceLoad(uint64_t crc) {
+    BENCH_LOOKUP_SCOPE("ResourceLoad(crc)");
     return Ship::Context::GetRawInstance()->GetResourceManager()->LoadResource(crc);
 }
 
@@ -22,34 +25,42 @@ uint64_t ResourceGetCrcByName(const char* name) {
 }
 
 const char* ResourceGetNameByCrc(uint64_t crc) {
+    BENCH_LOOKUP_SCOPE("ResourceGetNameByCrc");
     return Ship::Context::GetRawInstance()->GetResourceManager()->GetArchiveManager()->HashToCString(crc);
 }
 
 size_t ResourceGetSizeByName(const char* name) {
+    BENCH_LOOKUP_SCOPE("ResourceGetSizeByName");
     return Ship::Context::GetRawInstance()->GetResourceManager()->GetResourceSize(name);
 }
 
 size_t ResourceGetSizeByCrc(uint64_t crc) {
+    BENCH_LOOKUP_SCOPE("ResourceGetSizeByCrc");
     return Ship::Context::GetRawInstance()->GetResourceManager()->GetResourceSize(crc);
 }
 
 uint8_t ResourceGetIsCustomByName(const char* name) {
+    BENCH_LOOKUP_SCOPE("ResourceGetIsCustomByName");
     return Ship::Context::GetRawInstance()->GetResourceManager()->GetResourceIsCustom(name);
 }
 
 uint8_t ResourceGetIsCustomByCrc(uint64_t crc) {
+    BENCH_LOOKUP_SCOPE("ResourceGetIsCustomByCrc");
     return Ship::Context::GetRawInstance()->GetResourceManager()->GetResourceIsCustom(crc);
 }
 
 void* ResourceGetDataByName(const char* name) {
+    BENCH_LOOKUP_SCOPE("ResourceGetDataByName");
     return Ship::Context::GetRawInstance()->GetResourceManager()->GetResourceRawPointer(name);
 }
 
 void* ResourceGetDataByCrc(uint64_t crc) {
+    BENCH_LOOKUP_SCOPE("ResourceGetDataByCrc");
     return Ship::Context::GetRawInstance()->GetResourceManager()->GetResourceRawPointer(crc);
 }
 
 uint16_t ResourceGetTexWidthByName(const char* name) {
+    BENCH_LOOKUP_SCOPE("ResourceGetTexWidthByName");
     const auto res = std::static_pointer_cast<Fast::Texture>(ResourceLoad(name));
 
     if (res != nullptr) {
@@ -61,6 +72,7 @@ uint16_t ResourceGetTexWidthByName(const char* name) {
 }
 
 uint16_t ResourceGetTexWidthByCrc(uint64_t crc) {
+    BENCH_LOOKUP_SCOPE("ResourceGetTexWidthByCrc");
     const auto res = std::static_pointer_cast<Fast::Texture>(ResourceLoad(crc));
 
     if (res != nullptr) {
@@ -72,6 +84,7 @@ uint16_t ResourceGetTexWidthByCrc(uint64_t crc) {
 }
 
 uint16_t ResourceGetTexHeightByName(const char* name) {
+    BENCH_LOOKUP_SCOPE("ResourceGetTexHeightByName");
     const auto res = std::static_pointer_cast<Fast::Texture>(ResourceLoad(name));
 
     if (res != nullptr) {
@@ -83,6 +96,7 @@ uint16_t ResourceGetTexHeightByName(const char* name) {
 }
 
 uint16_t ResourceGetTexHeightByCrc(uint64_t crc) {
+    BENCH_LOOKUP_SCOPE("ResourceGetTexHeightByCrc");
     const auto res = std::static_pointer_cast<Fast::Texture>(ResourceLoad(crc));
 
     if (res != nullptr) {
@@ -94,6 +108,7 @@ uint16_t ResourceGetTexHeightByCrc(uint64_t crc) {
 }
 
 size_t ResourceGetTexSizeByName(const char* name) {
+    BENCH_LOOKUP_SCOPE("ResourceGetTexSizeByName");
     const auto res = std::static_pointer_cast<Fast::Texture>(ResourceLoad(name));
 
     if (res != nullptr) {
@@ -105,6 +120,7 @@ size_t ResourceGetTexSizeByName(const char* name) {
 }
 
 size_t ResourceGetTexSizeByCrc(uint64_t crc) {
+    BENCH_LOOKUP_SCOPE("ResourceGetTexSizeByCrc");
     const auto res = std::static_pointer_cast<Fast::Texture>(ResourceLoad(crc));
 
     if (res != nullptr) {
@@ -122,6 +138,7 @@ void ResourceGetGameVersions(uint32_t* versions, size_t versionsSize, size_t* ve
 }
 
 void ResourceLoadDirectoryAsync(const char* name) {
+    BENCH_LOOKUP_SCOPE("ResourceLoadDirectoryAsync");
     Ship::Context::GetRawInstance()->GetResourceManager()->LoadResourcesAsync(name);
 }
 
@@ -131,14 +148,17 @@ uint32_t ResourceHasGameVersion(uint32_t hash) {
 }
 
 void ResourceLoadDirectory(const char* name) {
+    BENCH_LOOKUP_SCOPE("ResourceLoadDirectory");
     Ship::Context::GetRawInstance()->GetResourceManager()->LoadResources(name);
 }
 
 void ResourceDirtyDirectory(const char* name) {
+    BENCH_LOOKUP_SCOPE("ResourceDirtyDirectory");
     Ship::Context::GetRawInstance()->GetResourceManager()->DirtyResources(name);
 }
 
 void ResourceDirtyByName(const char* name) {
+    BENCH_LOOKUP_SCOPE("ResourceDirtyByName");
     auto resource = ResourceLoad(name);
 
     if (resource != nullptr) {
@@ -147,6 +167,7 @@ void ResourceDirtyByName(const char* name) {
 }
 
 void ResourceDirtyByCrc(uint64_t crc) {
+    BENCH_LOOKUP_SCOPE("ResourceDirtyByCrc");
     auto resource = ResourceLoad(crc);
 
     if (resource != nullptr) {
@@ -155,14 +176,17 @@ void ResourceDirtyByCrc(uint64_t crc) {
 }
 
 void ResourceUnloadByName(const char* name) {
+    BENCH_LOOKUP_SCOPE("ResourceUnloadByName");
     Ship::Context::GetRawInstance()->GetResourceManager()->UnloadResource(name);
 }
 
 void ResourceUnloadByCrc(uint64_t crc) {
+    BENCH_LOOKUP_SCOPE("ResourceUnloadByCrc");
     ResourceUnloadByName(ResourceGetNameByCrc(crc));
 }
 
 void ResourceUnloadDirectory(const char* name) {
+    BENCH_LOOKUP_SCOPE("ResourceUnloadDirectory");
     Ship::Context::GetRawInstance()->GetResourceManager()->UnloadResources(name);
 }
 
