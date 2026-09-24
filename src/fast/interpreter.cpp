@@ -1265,11 +1265,105 @@ static uint8_t sBenchVtxPending[MAX_VERTICES + 4];
 static int sProbeSkipLight = 0;
 #endif
 
+// gSettings.LeanLight (§8.28), read once per frame in StartFrame. 1: light the vertices of a
+// GfxSpVertex call in a separate pass, four at a time, when every light is directional. Per light
+// the original is one dependent chain (int8 -> float, a fused dot product, a VDIV, then an
+// int -> float -> int round trip per channel), and the two lights of a vertex share r/g/b, so the
+// Cortex-A15 waits on latency. Four vertices give it four independent chains. Every operation is
+// the one the original compiles to (GCC contracts to VFMA under -ffp-contract=fast), spelled out
+// with fmaf so the loop shape cannot change what is fused. 2 (benchmark builds): run the original
+// and count the vertices the batched pass would have coloured differently. 3 and 4 (benchmark
+// builds): the same against a batch that multiplies by 1/127 (how often does that change a colour?)
+// or scales by 1.01 (must count mismatches, or the check is blind).
+static int sLeanLight = 0;
+
+// Directional lighting for vertices [0, n) of a load, bit-identical to GfxSpVertex's inline loop
+// for a geometry mode with G_LIGHTING and without G_LIGHTING_POSITIONAL. Writes color.r/g/b, or
+// with compare, leaves them and counts differences. inexact (benchmark modes 3-4 only): 1 multiplies
+// by 1/127 instead of dividing, 2 scales the intensity by 1.01 - a certain difference, to prove the
+// check can see one.
+static void LightDirectionalBatch(RSP* rsp, LoadedVertex* out, const F3DVtx* vertices, size_t n, bool compare,
+                                  int inexact = 0) {
+    const int nl = rsp->current_num_lights - 1;
+    const F3DLight& amb = rsp->current_lights[rsp->current_num_lights - 1];
+    // Per-call constants. (float) of a uint8 is exact, so converting once changes nothing.
+    float col[MAX_LIGHTS][3];
+    for (int l = 0; l < nl; l++) {
+        col[l][0] = rsp->current_lights[l].l.col[0];
+        col[l][1] = rsp->current_lights[l].l.col[1];
+        col[l][2] = rsp->current_lights[l].l.col[2];
+    }
+    for (size_t base = 0; base < n; base += 4) {
+        const size_t k = n - base < 4 ? n - base : 4;
+        float nx[4], ny[4], nz[4], r[4], g[4], b[4];
+#pragma GCC unroll 4
+        for (size_t j = 0; j < 4; j++) {
+            // A short tail repeats its last vertex rather than branch; the repeats are not stored.
+            const F3DVtx_tn* vn = &vertices[base + (j < k ? j : k - 1)].n;
+            nx[j] = vn->n[0];
+            ny[j] = vn->n[1];
+            nz[j] = vn->n[2];
+            r[j] = amb.l.col[0];
+            g[j] = amb.l.col[1];
+            b[j] = amb.l.col[2];
+        }
+        for (int l = 0; l < nl; l++) {
+            const float* c = rsp->current_lights_coeffs[l];
+            float in[4];
+    #pragma GCC unroll 4
+        for (size_t j = 0; j < 4; j++) {
+                const float dot = fmaf(nz[j], c[2], fmaf(ny[j], c[1], fmaf(nx[j], c[0], 0.0f)));
+                in[j] = inexact == 0 ? dot / 127.0f : inexact == 1 ? dot * (1.0f / 127.0f) : dot / 127.0f * 1.01f;
+            }
+    #pragma GCC unroll 4
+        for (size_t j = 0; j < 4; j++) {
+                // r stays a float holding an int: the original truncates to int after every light.
+                if (in[j] > 0.0f) {
+                    r[j] = (float)(int)fmaf(col[l][0], in[j], r[j]);
+                    g[j] = (float)(int)fmaf(col[l][1], in[j], g[j]);
+                    b[j] = (float)(int)fmaf(col[l][2], in[j], b[j]);
+                }
+            }
+        }
+#ifdef SOH_BENCHMARK
+        BENCH_COUNT(BENCH_VTX_LIGHT_DIR, compare ? 0 : (uint32_t)nl * k);
+#endif
+        for (size_t j = 0; j < k; j++) {
+            const int ri = (int)r[j], gi = (int)g[j], bi = (int)b[j];
+            const uint8_t r8 = ri > 255 ? 255 : ri, g8 = gi > 255 ? 255 : gi, b8 = bi > 255 ? 255 : bi;
+            LoadedVertex* d = &out[base + j];
+            if (compare) {
+#ifdef SOH_BENCHMARK
+                BENCH_COUNT(BENCH_LIGHT_CHECKED, 1);
+                BENCH_COUNT(BENCH_LIGHT_MISMATCH, d->color.r != r8 || d->color.g != g8 || d->color.b != b8);
+#endif
+            } else {
+                d->color.r = r8;
+                d->color.g = g8;
+                d->color.b = b8;
+            }
+        }
+    }
+}
+
 void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx* vertices) {
     // AdjXForAspectRatio's width / height, which nothing in this loop can change. Hoisting the
     // divide leaves the per-vertex result bit-identical: same operands, same order.
     const bool leanAspect = sLeanGeom && !mFbActive;
     const float aspect = (float)mCurDimensions.width / (float)mCurDimensions.height;
+    const size_t first_index = dest_index;
+    // LeanLight: the r/g/b loop below is replaced by LightDirectionalBatch after this loop (1), or
+    // checked against it (2). Texgen, fog and the light-direction recompute stay where they are.
+    const bool dirOnly =
+        (mRsp->geometry_mode & G_LIGHTING) && !(mRsp->geometry_mode & G_LIGHTING_POSITIONAL) && vertices != nullptr;
+    const bool batchLight = sLeanLight != 0 && dirOnly;
+#ifdef SOH_BENCHMARK
+    const bool inlineLight = !batchLight || sLeanLight >= 2;
+    const int inexactLight = sLeanLight >= 3 ? sLeanLight - 2 : 0;
+#else
+    const bool inlineLight = !batchLight;
+    const int inexactLight = 0;
+#endif
     for (size_t i = 0; i < n_vertices; i++, dest_index++) {
         const F3DVtx_t* v = &vertices[i].v;
         const F3DVtx_tn* vn = &vertices[i].n;
@@ -1335,7 +1429,7 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
             int g = mRsp->current_lights[mRsp->current_num_lights - 1].l.col[1];
             int b = mRsp->current_lights[mRsp->current_num_lights - 1].l.col[2];
 
-            for (int i = 0; i < mRsp->current_num_lights - 1; i++) {
+            for (int i = 0; inlineLight && i < mRsp->current_num_lights - 1; i++) {
                 float intensity = 0;
 #ifdef SOH_BENCHMARK
                 if ((mRsp->geometry_mode & G_LIGHTING_POSITIONAL) && (mRsp->current_lights[i].p.unk3 != 0)) {
@@ -1394,9 +1488,11 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
                 }
             }
 
-            d->color.r = r > 255 ? 255 : r;
-            d->color.g = g > 255 ? 255 : g;
-            d->color.b = b > 255 ? 255 : b;
+            if (inlineLight) {
+                d->color.r = r > 255 ? 255 : r;
+                d->color.g = g > 255 ? 255 : g;
+                d->color.b = b > 255 ? 255 : b;
+            }
 
             if (mRsp->geometry_mode & G_TEXTURE_GEN) {
 #ifdef SOH_BENCHMARK
@@ -1485,6 +1581,15 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
         } else {
             d->color.a = v->cn[3];
         }
+    }
+    if (batchLight) {
+#ifdef SOH_BENCHMARK
+        if (sProbeSkipLight == 1 || sProbeSkipLight == 2) {
+            return;
+        }
+#endif
+        LightDirectionalBatch(mRsp, &mRsp->loaded_vertices[first_index], vertices, n_vertices, inlineLight,
+                              inexactLight);
     }
 }
 
@@ -4531,6 +4636,7 @@ bool Interpreter::ViewportMatchesRendererResolution() {
 
 void Interpreter::StartFrame() {
     sLeanGeom = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanGeom", 1);
+    sLeanLight = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanLight", 0);
 #ifdef SOH_BENCHMARK
     sProbeSkipLight = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.ProbeSkipLight", 0);
 #endif
