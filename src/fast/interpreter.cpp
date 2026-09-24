@@ -1149,7 +1149,9 @@ void Interpreter::CalculateNormalDir(const F3DLight_t* light, float coeffs[3]) {
 void Interpreter::GfxSpMatrix(uint8_t parameters, const int32_t* addr) {
     float matrix[4][4];
 
+    BENCH_COUNT(BENCH_MTX, 1);
     if (auto it = mCurMtxReplacements->find((Mtx*)addr); it != mCurMtxReplacements->end()) {
+        BENCH_COUNT(BENCH_MTX_REPL, 1);
         for (int i = 0; i < 4; i++) {
             for (int j = 0; j < 4; j++) {
                 float v = it->second.mf[i][j];
@@ -4649,6 +4651,7 @@ void Interpreter::Run(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtx_r
     mGetPixelDepthCached.clear();
 
     mCurMtxReplacements = &mtx_replacements;
+    BENCH_COUNT(BENCH_MTX_MAP, mtx_replacements.size());
 
     mRapi->UpdateFramebufferParameters(0, mGfxCurrentWindowDimensions.width, mGfxCurrentWindowDimensions.height, 1,
                                        false, true, true, !mRendersToFb);

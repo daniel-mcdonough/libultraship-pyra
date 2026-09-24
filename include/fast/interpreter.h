@@ -185,6 +185,11 @@ enum BenchCounter {
     BENCH_VTX_TEXGEN,
     BENCH_VTX_FOG,
     BENCH_LIGHTS_RECALC,
+    // Frame interpolation (§8.29): GfxSpMatrix calls, the ones answered from the interpolated
+    // replacement map instead of the game's own matrix, and that map's size summed over frames.
+    BENCH_MTX,
+    BENCH_MTX_REPL,
+    BENCH_MTX_MAP,
     BENCH_COUNTER_COUNT
 };
 extern "C" uint32_t gBenchCounters[BENCH_COUNTER_COUNT];
