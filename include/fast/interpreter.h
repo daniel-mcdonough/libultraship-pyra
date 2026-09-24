@@ -202,6 +202,9 @@ extern "C" uint64_t gBenchFinishMicros;
 // Display-list commands stepped, per opcode byte, cumulative (§8.31). The benchmark diffs it across
 // a segment, as it does gBenchGlFn.
 extern "C" uint64_t gBenchOpcodes[256];
+// With gBenchOpTime set (SOH_BENCH_OPTIME=1), nanoseconds spent stepping each opcode, cumulative.
+extern "C" uint64_t gBenchOpNanos[256];
+extern "C" int gBenchOpTime;
 #define BENCH_COUNT(k, n) (gBenchCounters[(k)] += (uint32_t)(n))
 #else
 #define BENCH_COUNT(k, n) ((void)0)

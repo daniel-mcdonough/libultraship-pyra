@@ -10,6 +10,7 @@
 
 #include <any>
 #include <chrono>
+#include <time.h>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -1245,6 +1246,9 @@ void Interpreter::AdjustWidthHeightForScale(uint32_t& width, uint32_t& height, u
 // cycles and not pipelined, and the compiler may not turn x / 255.0f into a multiply because
 // 1/255 is inexact - so a table of n / 255.0f gives the identical float at a load's cost.
 static int sLeanGeom = 1;
+// gSettings.LeanTexLoad (§8.31), read with LeanGeom: skip the masked-texture lookup on every
+// texture load while no masked texture exists. Exact: a find in an empty map always misses.
+static int sLeanTexLoad = 0;
 static const struct U8ToUnitTable {
     float v[256];
     U8ToUnitTable() {
@@ -2220,11 +2224,14 @@ void Interpreter::GfxDpLoadBlock(uint8_t tile, uint32_t uls, uint32_t ult, uint3
     // orig_size_bytes,
     //         mRdp->texture_to_load.siz, lrs);
 
+    // gSettings.LeanTexLoad (§8.31): with no masked textures registered - the usual case - the
+    // lookup below always misses, so skip the path copy it is made with.
+    const bool anyMasked = !(sLeanTexLoad && mMaskedTextures.empty());
     const std::string& texPath =
-        mRdp->texture_to_load.raw_tex_metadata.resource != nullptr
+        anyMasked && mRdp->texture_to_load.raw_tex_metadata.resource != nullptr
             ? GetBaseTexturePath(mRdp->texture_to_load.raw_tex_metadata.resource->GetInitData()->Path)
             : "";
-    auto maskedTextureIter = mMaskedTextures.find(texPath);
+    auto maskedTextureIter = anyMasked ? mMaskedTextures.find(texPath) : mMaskedTextures.end();
     if (maskedTextureIter != mMaskedTextures.end()) {
         mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].masked = true;
         mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].blended =
@@ -2290,11 +2297,14 @@ void Interpreter::GfxDpLoadTile(uint8_t tile, uint32_t uls, uint32_t ult, uint32
     mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].raw_tex_metadata = mRdp->texture_to_load.raw_tex_metadata;
     mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].addr = mRdp->texture_to_load.addr + start_offset_bytes;
 
+    // gSettings.LeanTexLoad (§8.31): with no masked textures registered - the usual case - the
+    // lookup below always misses, so skip the path copy it is made with.
+    const bool anyMasked = !(sLeanTexLoad && mMaskedTextures.empty());
     const std::string& texPath =
-        mRdp->texture_to_load.raw_tex_metadata.resource != nullptr
+        anyMasked && mRdp->texture_to_load.raw_tex_metadata.resource != nullptr
             ? GetBaseTexturePath(mRdp->texture_to_load.raw_tex_metadata.resource->GetInitData()->Path)
             : "";
-    auto maskedTextureIter = mMaskedTextures.find(texPath);
+    auto maskedTextureIter = anyMasked ? mMaskedTextures.find(texPath) : mMaskedTextures.end();
     if (maskedTextureIter != mMaskedTextures.end()) {
         mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].masked = true;
         mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].blended =
@@ -4393,12 +4403,11 @@ static void gfx_set_ucode_handler(UcodeHandlers ucode) {
     }
 }
 
-static void gfx_step() {
+static void gfx_step_inner() {
     auto& cmd = g_exec_stack.currCmd();
     auto cmd0 = cmd;
     int8_t opcode = (int8_t)(cmd->words.w0 >> 24);
 #ifdef SOH_BENCHMARK
-    gBenchOpcodes[(uint8_t)opcode]++;
 #endif
 
 #ifdef USE_GBI_TRACE
@@ -4444,6 +4453,26 @@ static void gfx_step() {
     }
 
     ++cmd;
+}
+
+// Benchmark builds (§8.31): commands per opcode, and with SOH_BENCH_OPTIME=1 the wall time each
+// took, from one monotonic clock read per command. The clock's cost lands on every opcode
+// alike; the no-op sync commands read it directly. For choosing what to skip-probe, not a size.
+static inline void gfx_step() {
+#ifdef SOH_BENCHMARK
+    const uint8_t opcode = (uint8_t)(g_exec_stack.currCmd()->words.w0 >> 24);
+    gBenchOpcodes[opcode]++;
+    if (gBenchOpTime) {
+        timespec t0, t1;
+        clock_gettime(CLOCK_MONOTONIC, &t0);
+        gfx_step_inner();
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        gBenchOpNanos[opcode] +=
+            (uint64_t)((int64_t)(t1.tv_sec - t0.tv_sec) * 1000000000 + (t1.tv_nsec - t0.tv_nsec));
+        return;
+    }
+#endif
+    gfx_step_inner();
 }
 
 void Interpreter::SpReset() {
@@ -4536,6 +4565,7 @@ bool Interpreter::ViewportMatchesRendererResolution() {
 
 void Interpreter::StartFrame() {
     sLeanGeom = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanGeom", 1);
+    sLeanTexLoad = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanTexLoad", 0);
 #ifdef SOH_BENCHMARK
     sProbeSkipLight = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.ProbeSkipLight", 0);
 #endif
@@ -4729,6 +4759,8 @@ uint64_t gBenchSwapMicros = 0;
 int gBenchFinish = 0;
 uint64_t gBenchFinishMicros = 0;
 uint64_t gBenchOpcodes[256] = {};
+uint64_t gBenchOpNanos[256] = {};
+int gBenchOpTime = 0;
 }
 #endif
 
