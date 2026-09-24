@@ -1238,13 +1238,13 @@ void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size
     SetPerDrawUniforms();
 
     // printf("flushing %d tris\n", buf_vbo_num_tris);
-    // Orphaning the whole VBO every batch looks like the thing to fix, and on the PowerVR SGX544
-    // it is not. Measured on device, in us per draw: this path 68, one glBufferData per frame with
-    // offsets 60, client-side arrays 58, and a pre-allocated ring buffer written with
-    // glBufferSubData - the modern advice, and what a graphics programmer reaches for first - 221.
-    // Four times worse. Leave it alone unless you have re-measured on the target driver.
+    // On the PowerVR SGX544, orphaning the VBO with one glBufferData per draw looked harmless in a
+    // microbenchmark (us per draw: this path 68, client-side arrays 58, a glBufferSubData ring
+    // buffer 221), but in the real game each call makes the driver allocate device memory, and
+    // client-side arrays (LeanGLState 3, the GLES2 default) are -13.4% of the Market frame and
+    // -13.6% of render-thread CPU in real play. Never use a glBufferSubData ring on this driver.
     // See docs/pyra/05-phase0-device-measurements.md and docs/pyra/08-optimisation-opportunities.md
-    // section 8.6.
+    // sections 8.6, 8.24 and 8.25.
     if (mLeanGLState < 3) {
         BENCH_COUNT(BENCH_VBO_UPLOADS, 1);
         BENCH_COUNT(BENCH_VBO_BYTES, sizeof(float) * buf_vbo_len);
@@ -1317,7 +1317,14 @@ void GfxRenderingAPIOGL::OnResize() {
 
 void GfxRenderingAPIOGL::StartFrame() {
     mFrameCount++;
-    const int lean = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanGLState", 0);
+#ifdef USE_OPENGLES2
+    // Client-side vertex arrays (mode 3) are legal in GLES2 but not in a desktop core profile.
+    constexpr int kLeanGLStateDefault = 3;
+#else
+    constexpr int kLeanGLStateDefault = 0;
+#endif
+    const int lean = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanGLState",
+                                                                                     kLeanGLStateDefault);
     // Re-establish the attribute shadow every frame rather than trust that nothing else in the
     // context (ImGui draws between frames) left the arrays exactly as it found them; and on any
     // change of mode, since mode 0 does not maintain the shadow.
