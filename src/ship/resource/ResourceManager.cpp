@@ -171,7 +171,6 @@ std::shared_ptr<IResource> ResourceManager::LoadResourceProcess(const ResourceId
     if (file == nullptr && !mArchiveManager->HasFile(identifier.Path + ".meta")) {
         SPDLOG_TRACE("Failed to load resource file at path {}", identifier.Path);
         mResourceCache[identifier] = ResourceLoadError::NotFound;
-        mCacheGeneration.fetch_add(1, std::memory_order_release);
         return nullptr;
     }
 
@@ -198,7 +197,14 @@ std::shared_ptr<IResource> ResourceManager::LoadResourceProcess(const ResourceId
             mResourceCache[identifier] = ResourceLoadError::NotFound;
         }
     }
-    mCacheGeneration.fetch_add(1, std::memory_order_release);
+    // Only a newly loaded alternate asset can change the answer for something already looked up:
+    // it overrides the base asset of the same name. Any other insert is for a name no cached
+    // answer depends on, so it leaves the generation alone - which is what keeps a front cache hot
+    // while assets load lazily during play. (An alt/ name already cached as NotFound is never
+    // overwritten here: the lookup returns early above.)
+    if (resource != nullptr && identifier.Path.starts_with(IResource::gAltAssetPrefix)) {
+        mCacheGeneration.fetch_add(1, std::memory_order_release);
+    }
 
     if (resource != nullptr) {
         SPDLOG_TRACE("Loaded Resource {} on ResourceManager", identifier.Path);
@@ -448,8 +454,13 @@ size_t ResourceManager::UnloadResource(const std::string& filePath) {
 }
 
 void ResourceManager::CacheExternalResource(const std::string& filePath, std::shared_ptr<IResource> resource) {
-    const std::lock_guard<std::mutex> lock(mMutex);
-    mResourceCache[{ filePath, mDefaultCacheOwner, mDefaultCacheArchive }] = resource;
+    {
+        const std::lock_guard<std::mutex> lock(mMutex);
+        mResourceCache[{ filePath, mDefaultCacheOwner, mDefaultCacheArchive }] = resource;
+    }
+    // Unlike a load, this can replace the answer for a name already looked up (or turn a miss into
+    // a hit), so a front cache keyed on the generation has to flush.
+    mCacheGeneration.fetch_add(1, std::memory_order_release);
 }
 
 bool ResourceManager::WriteResource(const ResourceIdentifier& identifier, const std::vector<uint8_t>& data,
