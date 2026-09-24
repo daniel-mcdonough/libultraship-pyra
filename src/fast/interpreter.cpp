@@ -1258,6 +1258,11 @@ static inline float U8ToUnit(uint8_t x) {
 #ifdef SOH_BENCHMARK
 // Per loaded-vertex slot: 1 while the slot holds a transformed vertex no drawn triangle has used yet.
 static uint8_t sBenchVtxPending[MAX_VERTICES + 4];
+// gSettings.ProbeSkipLight (§8.27), benchmark builds only, read once per frame in StartFrame. Skips
+// work in GfxSpVertex outright - a wrong picture. It prices the ceiling of deferring that work to
+// the first drawn triangle; never ship it. 1: lighting, texgen and fog. 2: lighting and texgen.
+// 3: fog.
+static int sProbeSkipLight = 0;
 #endif
 
 void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx* vertices) {
@@ -1304,8 +1309,18 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
         short U = v->tc[0] * mRsp->texture_scaling_factor.s >> 16;
         short V = v->tc[1] * mRsp->texture_scaling_factor.t >> 16;
 
-        if (mRsp->geometry_mode & G_LIGHTING) {
+#ifdef SOH_BENCHMARK
+        const bool skipLight = sProbeSkipLight == 1 || sProbeSkipLight == 2;
+        const bool skipFog = sProbeSkipLight == 1 || sProbeSkipLight == 3;
+#else
+        const bool skipLight = false;
+        const bool skipFog = false;
+#endif
+        if ((mRsp->geometry_mode & G_LIGHTING) && !skipLight) {
             if (mRsp->lights_changed) {
+#ifdef SOH_BENCHMARK
+                BENCH_COUNT(BENCH_LIGHTS_RECALC, 1);
+#endif
                 for (int i = 0; i < mRsp->current_num_lights - 1; i++) {
                     CalculateNormalDir(&mRsp->current_lights[i].l, mRsp->current_lights_coeffs[i]);
                 }
@@ -1322,6 +1337,13 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
 
             for (int i = 0; i < mRsp->current_num_lights - 1; i++) {
                 float intensity = 0;
+#ifdef SOH_BENCHMARK
+                if ((mRsp->geometry_mode & G_LIGHTING_POSITIONAL) && (mRsp->current_lights[i].p.unk3 != 0)) {
+                    BENCH_COUNT(BENCH_VTX_LIGHT_POS, 1);
+                } else {
+                    BENCH_COUNT(BENCH_VTX_LIGHT_DIR, 1);
+                }
+#endif
                 if ((mRsp->geometry_mode & G_LIGHTING_POSITIONAL) && (mRsp->current_lights[i].p.unk3 != 0)) {
                     // Calculate distance from the light to the vertex
                     float dist_vec[3] = { mRsp->current_lights[i].p.pos[0] - world_pos[0],
@@ -1377,6 +1399,9 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
             d->color.b = b > 255 ? 255 : b;
 
             if (mRsp->geometry_mode & G_TEXTURE_GEN) {
+#ifdef SOH_BENCHMARK
+                BENCH_COUNT(BENCH_VTX_TEXGEN, 1);
+#endif
                 float dotx = 0, doty = 0;
                 dotx += vn->n[0] * mRsp->current_lookat_coeffs[0][0];
                 dotx += vn->n[1] * mRsp->current_lookat_coeffs[0][1];
@@ -1440,7 +1465,10 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
         d->z = z;
         d->w = w;
 
-        if (mRsp->geometry_mode & G_FOG) {
+        if ((mRsp->geometry_mode & G_FOG) && !skipFog) {
+#ifdef SOH_BENCHMARK
+            BENCH_COUNT(BENCH_VTX_FOG, 1);
+#endif
             if (fabsf(w) < 0.001f) {
                 // To avoid division by zero
                 w = 0.001f;
@@ -4503,6 +4531,9 @@ bool Interpreter::ViewportMatchesRendererResolution() {
 
 void Interpreter::StartFrame() {
     sLeanGeom = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanGeom", 1);
+#ifdef SOH_BENCHMARK
+    sProbeSkipLight = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.ProbeSkipLight", 0);
+#endif
     sResLookupMode = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanResLookup", 3);
     if (sResLookupMode >= 2) {
         sLookupRm = Ship::Context::GetInstance()->GetResourceManager();

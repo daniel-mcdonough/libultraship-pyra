@@ -177,6 +177,14 @@ enum BenchCounter {
     BENCH_TRI_RECT,
     BENCH_TRI_CLIPREJ,
     BENCH_TRI_CULLED,
+    // Inside the lighting loop (§8.27): directional and positional light iterations summed over lit
+    // vertices, vertices that ran texgen, vertices that ran fog, and light-direction recomputes
+    // (lights_changed).
+    BENCH_VTX_LIGHT_DIR,
+    BENCH_VTX_LIGHT_POS,
+    BENCH_VTX_TEXGEN,
+    BENCH_VTX_FOG,
+    BENCH_LIGHTS_RECALC,
     BENCH_COUNTER_COUNT
 };
 extern "C" uint32_t gBenchCounters[BENCH_COUNTER_COUNT];
