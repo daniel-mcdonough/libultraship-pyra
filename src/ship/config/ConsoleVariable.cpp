@@ -1,3 +1,4 @@
+#include "ship/resource/BenchLookup.h"
 #include "ship/config/ConsoleVariable.h"
 
 #include <functional>
@@ -21,6 +22,7 @@ ConsoleVariable::~ConsoleVariable() {
 }
 
 std::shared_ptr<CVar> ConsoleVariable::Get(const char* name) {
+    BENCH_CVAR_SCOPE("CV::Get");
     auto it = mVariables.find(name);
     return it != mVariables.end() ? it->second : nullptr;
 }

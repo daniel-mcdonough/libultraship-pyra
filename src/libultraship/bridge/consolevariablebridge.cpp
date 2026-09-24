@@ -1,24 +1,30 @@
+#include "ship/resource/BenchLookup.h"
 #include "libultraship/bridge/consolevariablebridge.h"
 #include "ship/Context.h"
 
 std::shared_ptr<Ship::CVar> CVarGet(const char* name) {
+    BENCH_CVAR_SCOPE("CVarGet");
     return Ship::Context::GetInstance()->GetConsoleVariables()->Get(name);
 }
 
 extern "C" {
 int32_t CVarGetInteger(const char* name, int32_t defaultValue) {
+    BENCH_CVAR_SCOPE("CVarGetInteger");
     return Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(name, defaultValue);
 }
 
 float CVarGetFloat(const char* name, float defaultValue) {
+    BENCH_CVAR_SCOPE("CVarGetFloat");
     return Ship::Context::GetInstance()->GetConsoleVariables()->GetFloat(name, defaultValue);
 }
 
 const char* CVarGetString(const char* name, const char* defaultValue) {
+    BENCH_CVAR_SCOPE("CVarGetString");
     return Ship::Context::GetInstance()->GetConsoleVariables()->GetString(name, defaultValue);
 }
 
 Color_RGBA8 CVarGetColor(const char* name, Color_RGBA8 defaultValue) {
+    BENCH_CVAR_SCOPE("CVarGetColor");
     return Ship::Context::GetInstance()->GetConsoleVariables()->GetColor(name, defaultValue);
 }
 

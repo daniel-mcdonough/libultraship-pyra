@@ -4397,6 +4397,9 @@ static void gfx_step() {
     auto& cmd = g_exec_stack.currCmd();
     auto cmd0 = cmd;
     int8_t opcode = (int8_t)(cmd->words.w0 >> 24);
+#ifdef SOH_BENCHMARK
+    gBenchOpcodes[(uint8_t)opcode]++;
+#endif
 
 #ifdef USE_GBI_TRACE
     if (cmd->words.trace.valid &&
@@ -4725,6 +4728,7 @@ uint32_t gBenchCounters[BENCH_COUNTER_COUNT] = {};
 uint64_t gBenchSwapMicros = 0;
 int gBenchFinish = 0;
 uint64_t gBenchFinishMicros = 0;
+uint64_t gBenchOpcodes[256] = {};
 }
 #endif
 

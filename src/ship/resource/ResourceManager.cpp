@@ -8,6 +8,7 @@
 #include "ship/utils/Utils.h"
 #include "ship/config/ConsoleVariable.h"
 #include "ship/Context.h"
+#include "ship/resource/BenchLookup.h"
 #ifdef SOH_BENCHMARK
 #include "fast/interpreter.h"
 #endif
@@ -209,6 +210,7 @@ std::shared_ptr<IResource> ResourceManager::LoadResourceProcess(const std::strin
 std::shared_future<std::shared_ptr<IResource>>
 ResourceManager::LoadResourceAsync(const ResourceIdentifier& identifier, bool loadExact, BS::priority_t priority,
                                    std::shared_ptr<ResourceInitData> initData) {
+    BENCH_LOOKUP_SCOPE("RM::LoadResourceAsync(id)");
     // Check for and remove the OTR signature
     if (OtrSignatureCheck(identifier.Path.c_str())) {
         auto newFilePath = identifier.Path.substr(7);
@@ -233,11 +235,13 @@ ResourceManager::LoadResourceAsync(const ResourceIdentifier& identifier, bool lo
 std::shared_future<std::shared_ptr<IResource>>
 ResourceManager::LoadResourceAsync(const std::string& filePath, bool loadExact, BS::priority_t priority,
                                    std::shared_ptr<ResourceInitData> initData) {
+    BENCH_LOOKUP_SCOPE("RM::LoadResourceAsync(path)");
     return LoadResourceAsync({ filePath, mDefaultCacheOwner, mDefaultCacheArchive }, loadExact, priority, initData);
 }
 
 std::shared_ptr<IResource> ResourceManager::LoadResource(const ResourceIdentifier& identifier, bool loadExact,
                                                          std::shared_ptr<ResourceInitData> initData) {
+    BENCH_LOOKUP_SCOPE("RM::LoadResource(id)");
     auto resource = LoadResourceAsync(identifier, loadExact, BS::pr::highest, initData).get();
     if (resource == nullptr) {
         SPDLOG_TRACE("Failed to load resource file at path {}", identifier.Path);
@@ -247,11 +251,13 @@ std::shared_ptr<IResource> ResourceManager::LoadResource(const ResourceIdentifie
 
 std::shared_ptr<IResource> ResourceManager::LoadResource(const std::string& filePath, bool loadExact,
                                                          std::shared_ptr<ResourceInitData> initData) {
+    BENCH_LOOKUP_SCOPE("RM::LoadResource(path)");
     return LoadResource({ filePath, mDefaultCacheOwner, mDefaultCacheArchive }, loadExact, initData);
 }
 
 std::shared_ptr<IResource> ResourceManager::LoadResource(uint64_t crc, bool loadExact,
                                                          std::shared_ptr<ResourceInitData> initData) {
+    BENCH_LOOKUP_SCOPE("RM::LoadResource(crc)");
     const std::string* hashStr = GetArchiveManager()->HashToString(crc);
     if (hashStr == nullptr || hashStr->length() == 0) {
         SPDLOG_TRACE("ResourceLoad: Unknown crc {}\n", crc);
@@ -480,12 +486,14 @@ size_t ResourceManager::GetResourceSize(std::shared_ptr<IResource> resource) {
 }
 
 size_t ResourceManager::GetResourceSize(const char* name) {
+    BENCH_LOOKUP_SCOPE("RM::GetResourceSize(name)");
     auto resource = LoadResource(name);
 
     return GetResourceSize(resource);
 }
 
 size_t ResourceManager::GetResourceSize(uint64_t crc) {
+    BENCH_LOOKUP_SCOPE("RM::GetResourceSize(crc)");
     auto resource = LoadResource(crc);
 
     return GetResourceSize(resource);
@@ -500,12 +508,14 @@ bool ResourceManager::GetResourceIsCustom(std::shared_ptr<IResource> resource) {
 }
 
 bool ResourceManager::GetResourceIsCustom(const char* name) {
+    BENCH_LOOKUP_SCOPE("RM::GetResourceIsCustom(name)");
     auto resource = LoadResource(name);
 
     return GetResourceIsCustom(resource);
 }
 
 bool ResourceManager::GetResourceIsCustom(uint64_t crc) {
+    BENCH_LOOKUP_SCOPE("RM::GetResourceIsCustom(crc)");
     auto resource = LoadResource(crc);
 
     return GetResourceIsCustom(resource);
@@ -520,12 +530,14 @@ void* ResourceManager::GetResourceRawPointer(std::shared_ptr<IResource> resource
 }
 
 void* ResourceManager::GetResourceRawPointer(const char* name) {
+    BENCH_LOOKUP_SCOPE("RM::GetResourceRawPointer(name)");
     auto resource = LoadResource(name);
 
     return GetResourceRawPointer(resource);
 }
 
 void* ResourceManager::GetResourceRawPointer(uint64_t crc) {
+    BENCH_LOOKUP_SCOPE("RM::GetResourceRawPointer(crc)");
     auto resource = LoadResource(crc);
 
     return GetResourceRawPointer(resource);

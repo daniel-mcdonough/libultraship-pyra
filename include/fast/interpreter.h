@@ -199,6 +199,9 @@ extern "C" uint64_t gBenchSwapMicros;
 // and GPU, so it changes the thing being measured.
 extern "C" int gBenchFinish;
 extern "C" uint64_t gBenchFinishMicros;
+// Display-list commands stepped, per opcode byte, cumulative (§8.31). The benchmark diffs it across
+// a segment, as it does gBenchGlFn.
+extern "C" uint64_t gBenchOpcodes[256];
 #define BENCH_COUNT(k, n) (gBenchCounters[(k)] += (uint32_t)(n))
 #else
 #define BENCH_COUNT(k, n) ((void)0)
