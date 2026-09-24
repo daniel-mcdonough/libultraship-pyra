@@ -155,8 +155,9 @@ enum BenchCounter {
     BENCH_LOOKUP_HIT,
     BENCH_LOOKUP_MISS,
     BENCH_LOOKUP_FLUSH,
-    // Calls into the GL driver from the OpenGL backend, all entry points (report 8 §8.24). Every
-    // one takes the PVR driver's user-space mutex, so this is what that mutex's share is paid per.
+    // Calls into the GL driver from the OpenGL backend, all entry points (report 8 §8.24). Each
+    // takes the PVR driver's user-space mutex, but §8.24 measured state calls at ~0.1 us: a count
+    // for mechanism, not a cost.
     BENCH_GL_CALLS,
     // The glUniform* subset of BENCH_GL_CALLS.
     BENCH_GL_UNIFORMS,
@@ -164,6 +165,18 @@ enum BenchCounter {
     // freeing device memory every frame (§8.21).
     BENCH_VBO_UPLOADS,
     BENCH_VBO_BYTES,
+    // Geometry work in the interpreter (§8.26), against BENCH_TRIS (triangles actually drawn):
+    // vertices GfxSpVertex transformed, how many of those ran the lighting loop, and how many were
+    // overwritten by a later load without any drawn triangle having used them.
+    BENCH_VTX_XFORM,
+    BENCH_VTX_LIT,
+    BENCH_VTX_UNUSED,
+    // GfxSpTri1 calls (texture rectangles included, and counted separately), and the ones it
+    // returned early for: all three vertices outside the same clip plane, or back/front-face culled.
+    BENCH_TRI_IN,
+    BENCH_TRI_RECT,
+    BENCH_TRI_CLIPREJ,
+    BENCH_TRI_CULLED,
     BENCH_COUNTER_COUNT
 };
 extern "C" uint32_t gBenchCounters[BENCH_COUNTER_COUNT];

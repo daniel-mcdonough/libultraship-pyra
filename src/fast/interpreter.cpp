@@ -1238,7 +1238,33 @@ void Interpreter::AdjustWidthHeightForScale(uint32_t& width, uint32_t& height, u
     }
 }
 
+// gSettings.LeanGeom (§8.26), read once per frame in StartFrame. 1: take the divides that are the
+// same for every vertex out of the per-vertex loops, bit-exactly. On the Cortex-A15 VDIV is ~14
+// cycles and not pipelined, and the compiler may not turn x / 255.0f into a multiply because
+// 1/255 is inexact - so a table of n / 255.0f gives the identical float at a load's cost.
+static int sLeanGeom = 1;
+static const struct U8ToUnitTable {
+    float v[256];
+    U8ToUnitTable() {
+        for (int i = 0; i < 256; i++) {
+            v[i] = i / 255.0f;
+        }
+    }
+} sU8ToUnit;
+static inline float U8ToUnit(uint8_t x) {
+    return sLeanGeom ? sU8ToUnit.v[x] : x / 255.0f;
+}
+
+#ifdef SOH_BENCHMARK
+// Per loaded-vertex slot: 1 while the slot holds a transformed vertex no drawn triangle has used yet.
+static uint8_t sBenchVtxPending[MAX_VERTICES + 4];
+#endif
+
 void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx* vertices) {
+    // AdjXForAspectRatio's width / height, which nothing in this loop can change. Hoisting the
+    // divide leaves the per-vertex result bit-identical: same operands, same order.
+    const bool leanAspect = sLeanGeom && !mFbActive;
+    const float aspect = (float)mCurDimensions.width / (float)mCurDimensions.height;
     for (size_t i = 0; i < n_vertices; i++, dest_index++) {
         const F3DVtx_t* v = &vertices[i].v;
         const F3DVtx_tn* vn = &vertices[i].n;
@@ -1247,6 +1273,14 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
         if (v == nullptr) {
             return;
         }
+#ifdef SOH_BENCHMARK
+        BENCH_COUNT(BENCH_VTX_XFORM, 1);
+        BENCH_COUNT(BENCH_VTX_LIT, (mRsp->geometry_mode & G_LIGHTING) ? 1 : 0);
+        if (dest_index < MAX_VERTICES + 4) {
+            BENCH_COUNT(BENCH_VTX_UNUSED, sBenchVtxPending[dest_index]);
+            sBenchVtxPending[dest_index] = 1;
+        }
+#endif
 
         float x = v->ob[0] * mRsp->MP_matrix[0][0] + v->ob[1] * mRsp->MP_matrix[1][0] +
                   v->ob[2] * mRsp->MP_matrix[2][0] + mRsp->MP_matrix[3][0];
@@ -1265,7 +1299,7 @@ void Interpreter::GfxSpVertex(size_t n_vertices, size_t dest_index, const F3DVtx
             world_pos[2] = v->ob[0] * mtx[0][2] + v->ob[1] * mtx[1][2] + v->ob[2] * mtx[2][2] + mtx[3][2];
         }
 
-        x = AdjXForAspectRatio(x);
+        x = leanAspect ? x * (4.0f / 3.0f) / aspect : AdjXForAspectRatio(x);
 
         short U = v->tc[0] * mRsp->texture_scaling_factor.s >> 16;
         short V = v->tc[1] * mRsp->texture_scaling_factor.t >> 16;
@@ -1445,8 +1479,11 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
 
     // if (rand()%2) return;
 
+    BENCH_COUNT(BENCH_TRI_IN, 1);
+    BENCH_COUNT(BENCH_TRI_RECT, is_rect ? 1 : 0);
     if (v1->clip_rej & v2->clip_rej & v3->clip_rej) {
         // The whole triangle lies outside the visible area
+        BENCH_COUNT(BENCH_TRI_CLIPREJ, 1);
         return;
     }
 
@@ -1477,17 +1514,28 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
 
         if (cull_type == cull_front) {
             if (cross <= 0) {
+                BENCH_COUNT(BENCH_TRI_CULLED, 1);
                 return;
             }
         } else if (cull_type == cull_back) {
             if (cross >= 0) {
+                BENCH_COUNT(BENCH_TRI_CULLED, 1);
                 return;
             }
         } else if (cull_type == cull_both) {
             // Why is this even an option?
+            BENCH_COUNT(BENCH_TRI_CULLED, 1);
             return;
         }
     }
+
+#ifdef SOH_BENCHMARK
+    for (uint8_t idx : { vtx1_idx, vtx2_idx, vtx3_idx }) {
+        if (idx < MAX_VERTICES + 4) {
+            sBenchVtxPending[idx] = 0;
+        }
+    }
+#endif
 
     bool depth_test = (mRsp->geometry_mode & G_ZBUFFER) == G_ZBUFFER;
     bool depth_mask = (mRdp->other_mode_l & Z_UPD) == Z_UPD;
@@ -1762,17 +1810,17 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
         }
 
         if (use_fog) {
-            mBufVbo[mBufVboLen++] = mRdp->fog_color.r / 255.0f;
-            mBufVbo[mBufVboLen++] = mRdp->fog_color.g / 255.0f;
-            mBufVbo[mBufVboLen++] = mRdp->fog_color.b / 255.0f;
-            mBufVbo[mBufVboLen++] = v_arr[i]->color.a / 255.0f; // fog factor (not alpha)
+            mBufVbo[mBufVboLen++] = U8ToUnit(mRdp->fog_color.r);
+            mBufVbo[mBufVboLen++] = U8ToUnit(mRdp->fog_color.g);
+            mBufVbo[mBufVboLen++] = U8ToUnit(mRdp->fog_color.b);
+            mBufVbo[mBufVboLen++] = U8ToUnit(v_arr[i]->color.a); // fog factor (not alpha)
         }
 
         if (use_grayscale) {
-            mBufVbo[mBufVboLen++] = mRdp->grayscale_color.r / 255.0f;
-            mBufVbo[mBufVboLen++] = mRdp->grayscale_color.g / 255.0f;
-            mBufVbo[mBufVboLen++] = mRdp->grayscale_color.b / 255.0f;
-            mBufVbo[mBufVboLen++] = mRdp->grayscale_color.a / 255.0f; // lerp interpolation factor (not alpha)
+            mBufVbo[mBufVboLen++] = U8ToUnit(mRdp->grayscale_color.r);
+            mBufVbo[mBufVboLen++] = U8ToUnit(mRdp->grayscale_color.g);
+            mBufVbo[mBufVboLen++] = U8ToUnit(mRdp->grayscale_color.b);
+            mBufVbo[mBufVboLen++] = U8ToUnit(mRdp->grayscale_color.a); // lerp interpolation factor (not alpha)
         }
 
         for (int j = 0; j < numInputs; j++) {
@@ -1833,15 +1881,15 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
                         break;
                 }
                 if (k == 0) {
-                    mBufVbo[mBufVboLen++] = color->r / 255.0f;
-                    mBufVbo[mBufVboLen++] = color->g / 255.0f;
-                    mBufVbo[mBufVboLen++] = color->b / 255.0f;
+                    mBufVbo[mBufVboLen++] = U8ToUnit(color->r);
+                    mBufVbo[mBufVboLen++] = U8ToUnit(color->g);
+                    mBufVbo[mBufVboLen++] = U8ToUnit(color->b);
                 } else {
                     if (use_fog && color == &v_arr[i]->color) {
                         // Shade alpha is 100% for fog
                         mBufVbo[mBufVboLen++] = 1.0f;
                     } else {
-                        mBufVbo[mBufVboLen++] = color->a / 255.0f;
+                        mBufVbo[mBufVboLen++] = U8ToUnit(color->a);
                     }
                 }
             }
@@ -4454,6 +4502,7 @@ bool Interpreter::ViewportMatchesRendererResolution() {
 }
 
 void Interpreter::StartFrame() {
+    sLeanGeom = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanGeom", 1);
     sResLookupMode = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanResLookup", 3);
     if (sResLookupMode >= 2) {
         sLookupRm = Ship::Context::GetInstance()->GetResourceManager();
