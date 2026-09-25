@@ -4763,10 +4763,16 @@ uint64_t gBenchFinishMicros = 0;
 uint64_t gBenchOpcodes[256] = {};
 uint64_t gBenchOpNanos[256] = {};
 int gBenchOpTime = 0;
+char gBenchDumpPath[512] = {};
+int gBenchDumpFb = 0;
 }
 #endif
 
 void Interpreter::EndFrame() {
+#ifdef SOH_BENCHMARK
+    // The resolved copy when multisampled: a multisampled buffer cannot be read directly.
+    gBenchDumpFb = !mRendersToFb ? 0 : mMsaaLevel > 1 ? mGameFbMsaaResolved : mGameFb;
+#endif
     mRapi->EndFrame();
 #ifdef SOH_BENCHMARK
     const auto swapStart = std::chrono::steady_clock::now();

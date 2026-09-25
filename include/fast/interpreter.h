@@ -205,6 +205,11 @@ extern "C" uint64_t gBenchOpcodes[256];
 // With gBenchOpTime set (SOH_BENCH_OPTIME=1), nanoseconds spent stepping each opcode, cumulative.
 extern "C" uint64_t gBenchOpNanos[256];
 extern "C" int gBenchOpTime;
+// When non-empty, the renderer writes framebuffer gBenchDumpFb - the game's render target, which the
+// interpreter sets each frame - to this path as a binary PPM at the end of the frame, then clears it. The benchmark sets it at a fixed frame of a segment, so both arms
+// of an A/B are captured at the same frame rather than at the same wall-clock time (§8.32).
+extern "C" char gBenchDumpPath[512];
+extern "C" int gBenchDumpFb;
 #define BENCH_COUNT(k, n) (gBenchCounters[(k)] += (uint32_t)(n))
 #else
 #define BENCH_COUNT(k, n) ((void)0)

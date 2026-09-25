@@ -1366,9 +1366,41 @@ void GfxRenderingAPIOGL::EndFrame() {
                                   std::chrono::steady_clock::now() - finishStart)
                                   .count();
     }
+    if (gBenchDumpPath[0] != '\0') {
+        DumpFramebuffer(gBenchDumpFb, gBenchDumpPath);
+        gBenchDumpPath[0] = '\0';
+    }
 #endif
     glFlush();
 }
+
+#ifdef SOH_BENCHMARK
+void GfxRenderingAPIOGL::DumpFramebuffer(int fb_id, const char* path) {
+    const FramebufferOGL& fb = mFrameBuffers[fb_id];
+    std::vector<uint8_t> rgba((size_t)fb.width * fb.height * 4);
+    glBindFramebuffer(GL_FRAMEBUFFER, fb.fbo);
+    glReadPixels(0, 0, fb.width, fb.height, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+    glBindFramebuffer(GL_FRAMEBUFFER, mFrameBuffers[mCurrentFrameBuffer].fbo);
+    FILE* f = fopen(path, "wb");
+    if (f == nullptr) {
+        SPDLOG_ERROR("Benchmark: cannot write frame dump {}", path);
+        return;
+    }
+    fprintf(f, "P6\n%u %u\n255\n", fb.width, fb.height);
+    // GL's rows run bottom-up; a PPM's run top-down.
+    std::vector<uint8_t> row((size_t)fb.width * 3);
+    for (int y = (int)fb.height - 1; y >= 0; y--) {
+        const uint8_t* src = &rgba[(size_t)y * fb.width * 4];
+        for (uint32_t x = 0; x < fb.width; x++) {
+            row[x * 3 + 0] = src[x * 4 + 0];
+            row[x * 3 + 1] = src[x * 4 + 1];
+            row[x * 3 + 2] = src[x * 4 + 2];
+        }
+        fwrite(row.data(), 1, row.size(), f);
+    }
+    fclose(f);
+}
+#endif
 
 void GfxRenderingAPIOGL::FinishRender() {
 }

@@ -120,6 +120,9 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
     void OnResize() override;
     void StartFrame() override;
     void EndFrame() override;
+#ifdef SOH_BENCHMARK
+    void DumpFramebuffer(int fb_id, const char* path);
+#endif
     void FinishRender() override;
     int CreateFramebuffer() override;
     void UpdateFramebufferParameters(int fb_id, uint32_t width, uint32_t height, uint32_t msaa_level,
