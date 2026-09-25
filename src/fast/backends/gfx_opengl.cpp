@@ -1839,9 +1839,15 @@ void GfxRenderingAPIOGL::StartFrame() {
     }
     mLeanGLState = lean;
     // gSettings.LeanGroup (§8.41): defer groupable draws and replay them grouped by program and
-    // textures. Only on client arrays, which it draws from.
-    const int group =
-        Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanGroup", 0);
+    // textures. Only on client arrays, which it draws from. The GLES2 default: −5.8% of the Market's
+    // window CPU. Not exact - where two opaque surfaces tie in depth the other may win (±1 level).
+#ifdef USE_OPENGLES2
+    constexpr int kLeanGroupDefault = 1;
+#else
+    constexpr int kLeanGroupDefault = 0;
+#endif
+    const int group = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanGroup",
+                                                                                      kLeanGroupDefault);
     SetLeanGroup(lean >= 3 && group != 0 ? 1 : 0);
 #ifdef SOH_BENCHMARK
     // gSettings.ProbeSkipDraw (§8.36), benchmark builds only: how much of the render thread is the

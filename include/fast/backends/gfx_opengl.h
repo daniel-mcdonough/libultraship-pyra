@@ -169,7 +169,8 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
     // 3: also draw from client-side vertex arrays instead of a glBufferData per draw.
     int mLeanGLState = 0;
 
-    // gSettings.LeanGroup (report 8 §8.41), read once per frame, only with LeanGLState 3. A draw
+    // gSettings.LeanGroup (report 8 §8.41), read once per frame, only with LeanGLState 3; the GLES2
+    // default. A draw
     // whose state is groupable - depth test on with GL_LESS, depth writes, no polygon offset, no
     // blend - is not drawn but appended to a bucket keyed by its program and textures. Anything
     // that could change what such a draw sees, or that needs it drawn (a draw that is not
