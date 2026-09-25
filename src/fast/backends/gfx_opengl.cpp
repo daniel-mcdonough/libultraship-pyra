@@ -1326,6 +1326,39 @@ void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size
         if (mBenchSkipDraw == 6) {
             glBindTexture(GL_TEXTURE_2D, cur);
         }
+    } else if (mBenchSkipDraw == 7 || mBenchSkipDraw == 8) {
+        // §8.39: what a uniform upload adds to the repeat, on draws whose program samples a texture.
+        // 7 re-uploads the texture-size uniform with the value it holds; 8 draws the repeat with the
+        // first width one larger, then restores it. The program's uniform ends as it was, so the
+        // LeanGLState=2 cache of it stays true.
+        ShaderProgram* prg = mCurrentShaderProgram;
+        if (prg->usedTextures[0] || prg->usedTextures[1]) {
+            const uint32_t t0 = mCurrentTextureIds[0], t1 = mCurrentTextureIds[1];
+            if (prg->floatTexSize) {
+                GLfloat size[4] = { (GLfloat)textures[t0].width, (GLfloat)textures[t0].height,
+                                    (GLfloat)textures[t1].width, (GLfloat)textures[t1].height };
+                const GLfloat w0 = size[0];
+                size[0] = mBenchSkipDraw == 8 ? w0 + 1.0f : w0;
+                glUniform2fv(prg->texture_size_location, 2, size);
+                glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
+                if (mBenchSkipDraw == 8) {
+                    size[0] = w0;
+                    glUniform2fv(prg->texture_size_location, 2, size);
+                }
+            } else {
+                GLint width[2] = { textures[t0].width, textures[t1].width };
+                const GLint w0 = width[0];
+                width[0] = mBenchSkipDraw == 8 ? w0 + 1 : w0;
+                glUniform1iv(prg->texture_width_location, 2, width);
+                glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
+                if (mBenchSkipDraw == 8) {
+                    width[0] = w0;
+                    glUniform1iv(prg->texture_width_location, 2, width);
+                }
+            }
+        } else {
+            glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
+        }
     }
     mBenchPrevTex0 = mLastBoundTextures[0];
 #endif
@@ -1419,6 +1452,8 @@ void GfxRenderingAPIOGL::StartFrame() {
     // entirely. The interpreter still does all of its own. Wrong picture by design.
     // 3 and 4 (§8.37) draw each batch twice: all of it, or its first triangle. 5 and 6 (§8.38) repeat
     // it with a texture bind away and back before, or with another texture bound.
+    // 7 and 8 (§8.39) repeat it after re-uploading the texture-size uniform unchanged, or with a
+    // different value.
     mBenchSkipDraw = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.ProbeSkipDraw", 0);
 #endif
 }
