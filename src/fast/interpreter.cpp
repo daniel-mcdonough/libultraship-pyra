@@ -126,7 +126,24 @@ void GfxSetInstance(std::shared_ptr<Interpreter> gfx) {
     mInstance = gfx;
 }
 
+#ifdef SOH_BENCHMARK
+// Why each batch was split from the one before (§8.37): the state changes seen since the last batch
+// started, as a set of BENCH_BRK_* bits. A flush site marks its bit before flushing; a flush that
+// draws with no bit marked is BENCH_BRK_OTHER (framebuffer commands, the end of a frame, a new
+// combiner). The set is counted when the next batch takes its first triangle, so every draw is
+// counted once, under every change that separated it from the previous one.
+static uint32_t sBenchBreak = 0;
+#define BENCH_BREAK(b) (sBenchBreak |= (b))
+#else
+#define BENCH_BREAK(b) ((void)0)
+#endif
+
 void Interpreter::Flush() {
+#ifdef SOH_BENCHMARK
+    if (mBufVboLen > 0 && sBenchBreak == 0) {
+        sBenchBreak = BENCH_BRK_OTHER;
+    }
+#endif
     if (mBufVboLen > 0) {
         mRapi->DrawTriangles(mBufVbo, mBufVboLen, mBufVboNumTris);
         mBufVboLen = 0;
@@ -1599,6 +1616,7 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
     bool depth_mask = (mRdp->other_mode_l & Z_UPD) == Z_UPD;
     uint8_t depth_test_and_mask = (depth_test ? 1 : 0) | (depth_mask ? 2 : 0);
     if (depth_test_and_mask != mRenderingState.depth_test_and_mask) {
+        BENCH_BREAK(BENCH_BRK_DEPTH);
         Flush();
         mRapi->SetDepthTestAndMask(depth_test, depth_mask);
         mRenderingState.depth_test_and_mask = depth_test_and_mask;
@@ -1606,6 +1624,7 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
 
     bool zmode_decal = (mRdp->other_mode_l & ZMODE_DEC) == ZMODE_DEC;
     if (zmode_decal != mRenderingState.decal_mode) {
+        BENCH_BREAK(BENCH_BRK_DECAL);
         Flush();
         mRapi->SetZmodeDecal(zmode_decal);
         mRenderingState.decal_mode = zmode_decal;
@@ -1613,11 +1632,13 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
 
     if (mRdp->viewport_or_scissor_changed) {
         if (memcmp(&mRdp->viewport, &mRenderingState.viewport, sizeof(mRdp->viewport)) != 0) {
+            BENCH_BREAK(BENCH_BRK_VIEWPORT);
             Flush();
             mRapi->SetViewport(mRdp->viewport.x, mRdp->viewport.y, mRdp->viewport.width, mRdp->viewport.height);
             mRenderingState.viewport = mRdp->viewport;
         }
         if (memcmp(&mRdp->scissor, &mRenderingState.scissor, sizeof(mRdp->scissor)) != 0) {
+            BENCH_BREAK(BENCH_BRK_SCISSOR);
             Flush();
             mRapi->SetScissor(mRdp->scissor.x, mRdp->scissor.y, mRdp->scissor.width, mRdp->scissor.height);
             mRenderingState.scissor = mRdp->scissor;
@@ -1708,6 +1729,16 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
         uint32_t tile = mRdp->first_tile_index + i;
         if (comb->usedTextures[i]) {
             if (mRdp->textures_changed[i]) {
+#ifdef SOH_BENCHMARK
+                // Item H: this flush comes before the texture is known. TEX_SAME marks a reload that
+                // resolved to the texture already bound in this unit, with no mask or blend texture.
+                // The final mark comes after the import; it still reaches the new batch's set, which is
+                // counted at its first triangle, below.
+                const TextureCacheNode* benchTexBefore = mRenderingState.mTextures[i];
+                // Provisional mark, so the flush below is not read as BENCH_BRK_OTHER.
+                const uint32_t benchTexNewBefore = sBenchBreak & BENCH_BRK_TEX_NEW;
+                BENCH_BREAK(BENCH_BRK_TEX_NEW);
+#endif
                 Flush();
                 ImportTexture(i, tile, false);
                 if (mRdp->loaded_texture[i].masked) {
@@ -1716,6 +1747,13 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
                 if (mRdp->loaded_texture[i].blended) {
                     ImportTexture(SHADER_FIRST_REPLACEMENT_TEXTURE + i, tile, true);
                 }
+#ifdef SOH_BENCHMARK
+                sBenchBreak = (sBenchBreak & ~(uint32_t)BENCH_BRK_TEX_NEW) | benchTexNewBefore;
+                BENCH_BREAK(benchTexBefore == mRenderingState.mTextures[i] && !mRdp->loaded_texture[i].masked &&
+                                    !mRdp->loaded_texture[i].blended
+                                ? BENCH_BRK_TEX_SAME
+                                : BENCH_BRK_TEX_NEW);
+#endif
                 mRdp->textures_changed[i] = false;
             }
 
@@ -1768,6 +1806,7 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
             bool linear_filter = (mRdp->other_mode_h & (3U << G_MDSFT_TEXTFILT)) != G_TF_POINT;
             if (linear_filter != mRenderingState.mTextures[i]->second.linear_filter ||
                 cms != mRenderingState.mTextures[i]->second.cms || cmt != mRenderingState.mTextures[i]->second.cmt) {
+                BENCH_BREAK(BENCH_BRK_SAMPLER);
                 Flush();
 
                 // Set the same sampler params on the blended texture. Needed for opengl.
@@ -1789,12 +1828,14 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
             LookupOrCreateShaderProgram(comb->shader_id0, comb->shader_id1 | tm * SHADER_OPT(TEXEL0_CLAMP_S));
     }
     if (prg != mRenderingState.mShaderProgram) {
+        BENCH_BREAK(BENCH_BRK_PROGRAM);
         Flush();
         mRapi->UnloadShader(mRenderingState.mShaderProgram);
         mRapi->LoadShader(prg);
         mRenderingState.mShaderProgram = prg;
     }
     if (use_alpha != mRenderingState.alpha_blend) {
+        BENCH_BREAK(BENCH_BRK_BLEND);
         Flush();
         mRapi->SetUseAlpha(use_alpha);
         mRenderingState.alpha_blend = use_alpha;
@@ -1805,6 +1846,13 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
     mRapi->ShaderGetInfo(prg, &numInputs, usedTextures);
 
     struct GfxClipParameters clip_parameters = mRapi->GetClipParameters();
+
+#ifdef SOH_BENCHMARK
+    if (mBufVboLen == 0) {
+        gBenchBatchCause[sBenchBreak & (BENCH_BRK_SETS - 1)]++;
+        sBenchBreak = 0;
+    }
+#endif
 
     for (int i = 0; i < 3; i++) {
         float z = v_arr[i]->z, w = v_arr[i]->w;
@@ -1962,6 +2010,7 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
 
     if (++mBufVboNumTris == MAX_TRI_BUFFER) {
         // if (++mBufVbo_num_tris == 1) {
+        BENCH_BREAK(BENCH_BRK_FULL);
         Flush();
     }
 }
@@ -4788,6 +4837,10 @@ uint64_t gBenchOpNanos[256] = {};
 int gBenchOpTime = 0;
 char gBenchDumpPath[512] = {};
 int gBenchDumpFb = 0;
+uint64_t gBenchBatchCause[BENCH_BRK_SETS] = {};
+extern const char* const gBenchBatchCauseNames[BENCH_BRK_BITS] = { "depth",   "decal",   "viewport", "scissor",
+                                                            "tex_new", "tex_same", "sampler", "program",
+                                                            "blend",   "full",    "other" };
 }
 #endif
 

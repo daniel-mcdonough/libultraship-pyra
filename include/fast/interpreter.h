@@ -211,6 +211,26 @@ extern "C" int gBenchOpTime;
 // of an A/B are captured at the same frame rather than at the same wall-clock time (§8.32).
 extern "C" char gBenchDumpPath[512];
 extern "C" int gBenchDumpFb;
+// Draws by the set of state changes that split each from the previous batch (§8.37), cumulative,
+// indexed by a set of these bits. TEX_SAME is a texture reload that bound the texture already bound
+// (NEXT.md item H); OTHER is a flush from anywhere else (framebuffer commands, end of frame).
+enum BenchBreak {
+    BENCH_BRK_DEPTH = 1 << 0,
+    BENCH_BRK_DECAL = 1 << 1,
+    BENCH_BRK_VIEWPORT = 1 << 2,
+    BENCH_BRK_SCISSOR = 1 << 3,
+    BENCH_BRK_TEX_NEW = 1 << 4,
+    BENCH_BRK_TEX_SAME = 1 << 5,
+    BENCH_BRK_SAMPLER = 1 << 6,
+    BENCH_BRK_PROGRAM = 1 << 7,
+    BENCH_BRK_BLEND = 1 << 8,
+    BENCH_BRK_FULL = 1 << 9,
+    BENCH_BRK_OTHER = 1 << 10,
+    BENCH_BRK_BITS = 11,
+    BENCH_BRK_SETS = 1 << 11,
+};
+extern "C" uint64_t gBenchBatchCause[BENCH_BRK_SETS];
+extern "C" const char* const gBenchBatchCauseNames[BENCH_BRK_BITS];
 #define BENCH_COUNT(k, n) (gBenchCounters[(k)] += (uint32_t)(n))
 #else
 #define BENCH_COUNT(k, n) ((void)0)

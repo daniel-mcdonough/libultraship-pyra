@@ -1293,6 +1293,16 @@ void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size
     }
 #endif
     glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
+#ifdef SOH_BENCHMARK
+    // gSettings.ProbeSkipDraw=3 (§8.37): the same draw again, no state change between - the price of
+    // a call whose state the driver has just validated. 4: the second draw is only the first
+    // triangle, which separates a per-call cost from copying the client-array vertices.
+    if (mBenchSkipDraw == 3) {
+        glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
+    } else if (mBenchSkipDraw == 4) {
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+    }
+#endif
 }
 
 void GfxRenderingAPIOGL::Init() {
@@ -1370,6 +1380,7 @@ void GfxRenderingAPIOGL::StartFrame() {
     // gSettings.ProbeSkipDraw (§8.36), benchmark builds only: how much of the render thread is the
     // driver taking draws. 1 skips glDrawArrays in DrawTriangles; 2 skips DrawTriangles' GL work
     // entirely. The interpreter still does all of its own. Wrong picture by design.
+    // 3 and 4 (§8.37) draw each batch twice: all of it, or its first triangle.
     mBenchSkipDraw = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.ProbeSkipDraw", 0);
 #endif
 }
