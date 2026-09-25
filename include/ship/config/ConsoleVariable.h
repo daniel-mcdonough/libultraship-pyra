@@ -77,8 +77,10 @@ class ConsoleVariable {
     // gSettings.LeanCVar (§8.31): 0 the original lookup, which builds a std::string key and copies a
     // shared_ptr per read; 1 a transparent find returning a raw pointer, the same answer without
     // either; 2 (benchmark builds) a per-thread memo on the name pointer, a probe only - a pointer
-    // can later hold a different name. Read when it is set, and on Load.
-    int mLeanCVar = 0;
+    // can later hold a different name. Read when it is set, and on Load. Default 1 since §8.32: the
+    // picture change §8.31 blamed on it was the benchmark's camera override; exact at both fixtures,
+    // -1.5% Market and -1.7% Hyrule Field render-thread CPU at 1000 MHz.
+    int mLeanCVar = 1;
     CVar* Find(const char* name);
     enum class LeanGetterKind { Integer, Float, String, Color };
     bool LeanGetter(LeanGetterKind kind) const;

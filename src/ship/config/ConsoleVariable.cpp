@@ -45,7 +45,7 @@ void ConsoleVariable::Changed(const char* name, bool structural) {
 #endif
     if (name == nullptr || strcmp(name, "gSettings.LeanCVar") == 0) {
         auto it = mVariables.find(std::string_view("gSettings.LeanCVar"));
-        mLeanCVar = it != mVariables.end() && it->second->Type == ConsoleVariableType::Integer ? it->second->Integer : 0;
+        mLeanCVar = it != mVariables.end() && it->second->Type == ConsoleVariableType::Integer ? it->second->Integer : 1;
     }
 }
 
@@ -105,7 +105,7 @@ std::shared_ptr<CVar> ConsoleVariable::Get(const char* name) {
     // why modes 1 and 3 changed the frozen Market's picture (§8.31). Not the lookups: the benchmark's
     // camera override was being overwritten by Camera_Update, and whether it was turned on
     // uninitialised reads in the camera code, which any change to this function's stack use moved
-    // (§8.32). The harness now applies it just before View_Apply.
+    // (§8.32). The harness now applies it just before View_Apply. Mode 1 is the default.
     if (mLeanCVar >= 1 && mLeanCVar <= 3) {
         auto it = mVariables.find(std::string_view(name));
         return it != mVariables.end() ? it->second : nullptr;
