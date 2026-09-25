@@ -45,7 +45,7 @@ void ConsoleVariable::Changed(const char* name, bool structural) {
 #endif
     if (name == nullptr || strcmp(name, "gSettings.LeanCVar") == 0) {
         auto it = mVariables.find(std::string_view("gSettings.LeanCVar"));
-        mLeanCVar = it != mVariables.end() && it->second->Type == ConsoleVariableType::Integer ? it->second->Integer : 0;
+        mLeanCVar = it != mVariables.end() && it->second->Type == ConsoleVariableType::Integer ? it->second->Integer : 1;
     }
 }
 
