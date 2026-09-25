@@ -1177,6 +1177,28 @@ void Interpreter::GfxSpMatrix(uint8_t parameters, const int32_t* addr) {
 #endif
     }
 
+#ifdef SOH_BENCHMARK
+    // During a dumped frame (§8.32), each matrix as received goes to <dump path>.mtx: uint32
+    // parameters, uint32 whether frame interpolation replaced it, then the 16 floats.
+    if (gBenchDumpPath[0] != '\0') {
+        static std::string tracePath;
+        static FILE* trace = nullptr;
+        if (tracePath != gBenchDumpPath) {
+            if (trace != nullptr) {
+                fclose(trace);
+            }
+            tracePath = gBenchDumpPath;
+            trace = fopen((tracePath + ".mtx").c_str(), "wb");
+        }
+        if (trace != nullptr) {
+            const uint32_t header[2] = { parameters,
+                                         (uint32_t)(mCurMtxReplacements->find((Mtx*)addr) != mCurMtxReplacements->end()) };
+            fwrite(header, sizeof(header), 1, trace);
+            fwrite(matrix, sizeof(matrix), 1, trace);
+            fflush(trace);
+        }
+    }
+#endif
     const int8_t mtx_projection = get_attr(MTX_PROJECTION);
     const int8_t mtx_load = get_attr(MTX_LOAD);
     const int8_t mtx_push = get_attr(MTX_PUSH);

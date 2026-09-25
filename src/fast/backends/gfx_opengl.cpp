@@ -1183,9 +1183,30 @@ void GfxRenderingAPIOGL::SetUseAlpha(bool use_alpha) {
     }
 }
 
+#ifdef SOH_BENCHMARK
+// During a frame being dumped (§8.32), every draw's vertex data goes to <dump path>.vbo: per draw a
+// header of four uint32 - float count, triangle count, GL program, floats per vertex - then the
+// floats. Two arms' files diff draw by draw.
+static FILE* sBenchVboTrace = nullptr;
+#endif
+
 void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
     BENCH_COUNT(BENCH_DRAWS, 1);
     BENCH_COUNT(BENCH_TRIS, buf_vbo_num_tris);
+#ifdef SOH_BENCHMARK
+    if (gBenchDumpPath[0] != '\0') {
+        if (sBenchVboTrace == nullptr) {
+            const std::string path = std::string(gBenchDumpPath) + ".vbo";
+            sBenchVboTrace = fopen(path.c_str(), "wb");
+        }
+        if (sBenchVboTrace != nullptr) {
+            const uint32_t header[4] = { (uint32_t)buf_vbo_len, (uint32_t)buf_vbo_num_tris,
+                                         mCurrentShaderProgram->openglProgramId, mCurrentShaderProgram->numFloats };
+            fwrite(header, sizeof(header), 1, sBenchVboTrace);
+            fwrite(buf_vbo, sizeof(float), buf_vbo_len, sBenchVboTrace);
+        }
+    }
+#endif
     if (mCurrentDepthTest != mLastDepthTest || mCurrentDepthMask != mLastDepthMask) {
         mLastDepthTest = mCurrentDepthTest;
         mLastDepthMask = mCurrentDepthMask;
@@ -1368,6 +1389,10 @@ void GfxRenderingAPIOGL::EndFrame() {
     }
     if (gBenchDumpPath[0] != '\0') {
         DumpFramebuffer(gBenchDumpFb, gBenchDumpPath);
+        if (sBenchVboTrace != nullptr) {
+            fclose(sBenchVboTrace);
+            sBenchVboTrace = nullptr;
+        }
         gBenchDumpPath[0] = '\0';
     }
 #endif

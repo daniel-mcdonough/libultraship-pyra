@@ -88,12 +88,25 @@ CVar* ConsoleVariable::Find(const char* name) {
     return it != mVariables.end() ? it->second.get() : nullptr;
 }
 
+// Which getters take the lean path. Modes 5-9 (benchmark builds) bisect why a non-zero mode changes
+// the device's picture (§8.32): 5 none of them, 6-9 one family each.
+bool ConsoleVariable::LeanGetter(LeanGetterKind kind) const {
+#ifdef SOH_BENCHMARK
+    if (mLeanCVar >= 5) {
+        return mLeanCVar == 6 + (int)kind;
+    }
+#endif
+    return mLeanCVar != 0;
+}
+
 std::shared_ptr<CVar> ConsoleVariable::Get(const char* name) {
     BENCH_CVAR_SCOPE("CV::Get");
     // Mode 4 (benchmark builds) is mode 3 with Get() left on the original keyed find: a bisect of
-    // why modes 1 and 3 change the frozen Market's picture (§8.31). Mode 4 changes it too, so the
-    // cause is neither lookup. Unexplained; LeanCVar stays 0.
-    if (mLeanCVar != 0 && mLeanCVar != 4) {
+    // why modes 1 and 3 changed the frozen Market's picture (§8.31). Not the lookups: the benchmark's
+    // camera override was being overwritten by Camera_Update, and whether it was turned on
+    // uninitialised reads in the camera code, which any change to this function's stack use moved
+    // (§8.32). The harness now applies it just before View_Apply.
+    if (mLeanCVar >= 1 && mLeanCVar <= 3) {
         auto it = mVariables.find(std::string_view(name));
         return it != mVariables.end() ? it->second : nullptr;
     }
@@ -102,7 +115,7 @@ std::shared_ptr<CVar> ConsoleVariable::Get(const char* name) {
 }
 
 int32_t ConsoleVariable::GetInteger(const char* name, int32_t defaultValue) {
-    if (mLeanCVar != 0) {
+    if (LeanGetter(LeanGetterKind::Integer)) {
         const CVar* variable = Find(name);
 
         if (variable != nullptr && variable->Type == ConsoleVariableType::Integer) {
@@ -122,7 +135,7 @@ int32_t ConsoleVariable::GetInteger(const char* name, int32_t defaultValue) {
 }
 
 float ConsoleVariable::GetFloat(const char* name, float defaultValue) {
-    if (mLeanCVar != 0) {
+    if (LeanGetter(LeanGetterKind::Float)) {
         const CVar* variable = Find(name);
 
         if (variable != nullptr && variable->Type == ConsoleVariableType::Float) {
@@ -142,7 +155,7 @@ float ConsoleVariable::GetFloat(const char* name, float defaultValue) {
 }
 
 const char* ConsoleVariable::GetString(const char* name, const char* defaultValue) {
-    if (mLeanCVar != 0) {
+    if (LeanGetter(LeanGetterKind::String)) {
         const CVar* variable = Find(name);
 
         if (variable != nullptr && variable->Type == ConsoleVariableType::String) {
@@ -162,7 +175,7 @@ const char* ConsoleVariable::GetString(const char* name, const char* defaultValu
 }
 
 Color_RGBA8 ConsoleVariable::GetColor(const char* name, Color_RGBA8 defaultValue) {
-    if (mLeanCVar != 0) {
+    if (LeanGetter(LeanGetterKind::Color)) {
         const CVar* variable = Find(name);
 
         if (variable != nullptr && variable->Type == ConsoleVariableType::Color) {
@@ -196,7 +209,7 @@ Color_RGBA8 ConsoleVariable::GetColor(const char* name, Color_RGBA8 defaultValue
 }
 
 Color_RGB8 ConsoleVariable::GetColor24(const char* name, Color_RGB8 defaultValue) {
-    if (mLeanCVar != 0) {
+    if (LeanGetter(LeanGetterKind::Color)) {
         const CVar* variable = Find(name);
 
         if (variable != nullptr && variable->Type == ConsoleVariableType::Color24) {

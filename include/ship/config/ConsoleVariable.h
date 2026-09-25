@@ -80,6 +80,8 @@ class ConsoleVariable {
     // can later hold a different name. Read when it is set, and on Load.
     int mLeanCVar = 0;
     CVar* Find(const char* name);
+    enum class LeanGetterKind { Integer, Float, String, Color };
+    bool LeanGetter(LeanGetterKind kind) const;
     void Changed(const char* name, bool structural);
 };
 } // namespace Ship
