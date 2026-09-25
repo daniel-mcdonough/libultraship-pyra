@@ -4780,6 +4780,7 @@ void Interpreter::Run(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtx_r
 extern "C" {
 uint32_t gBenchCounters[BENCH_COUNTER_COUNT] = {};
 uint64_t gBenchSwapMicros = 0;
+uint64_t gBenchEofCpuMicros = 0;
 int gBenchFinish = 0;
 uint64_t gBenchFinishMicros = 0;
 uint64_t gBenchOpcodes[256] = {};
@@ -4795,6 +4796,13 @@ void Interpreter::EndFrame() {
     // The resolved copy when multisampled: a multisampled buffer cannot be read directly.
     gBenchDumpFb = !mRendersToFb ? 0 : mMsaaLevel > 1 ? mGameFbMsaaResolved : mGameFb;
 #endif
+#ifdef SOH_BENCHMARK
+    // The render thread's CPU time from here to the end of the swap (report 8 §8.36): the backend's
+    // end of frame (depth discard, glFlush) and the swap, i.e. the driver's per-frame kick, as work
+    // rather than as waiting. swap_us is the swap's wall time and mostly waiting.
+    timespec eofStart{};
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &eofStart);
+#endif
     mRapi->EndFrame();
 #ifdef SOH_BENCHMARK
     const auto swapStart = std::chrono::steady_clock::now();
@@ -4807,6 +4815,13 @@ void Interpreter::EndFrame() {
 #endif
     mRapi->FinishRender();
     mWapi->SwapBuffersEnd();
+#ifdef SOH_BENCHMARK
+    timespec eofEnd{};
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &eofEnd);
+    gBenchEofCpuMicros += (uint64_t)((eofEnd.tv_sec - eofStart.tv_sec) * 1000000000LL +
+                                     (eofEnd.tv_nsec - eofStart.tv_nsec)) /
+                          1000u;
+#endif
 }
 
 void gfx_set_target_ucode(UcodeHandlers ucode) {

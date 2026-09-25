@@ -1194,6 +1194,12 @@ void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size
     BENCH_COUNT(BENCH_DRAWS, 1);
     BENCH_COUNT(BENCH_TRIS, buf_vbo_num_tris);
 #ifdef SOH_BENCHMARK
+    // gSettings.ProbeSkipDraw=2 (§8.36): none of the per-draw GL side - state, uniforms, attributes,
+    // the draw. Returning before the state comparisons leaves the backend's shadow state and the
+    // driver's agreeing, so the other arm draws correctly after it. Wrong picture by design.
+    if (mBenchSkipDraw == 2) {
+        return;
+    }
     if (gBenchDumpPath[0] != '\0') {
         if (sBenchVboTrace == nullptr) {
             const std::string path = std::string(gBenchDumpPath) + ".vbo";
@@ -1280,6 +1286,12 @@ void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size
     } else {
         glBufferData(GL_ARRAY_BUFFER, sizeof(float) * buf_vbo_len, buf_vbo, GL_STREAM_DRAW);
     }
+#ifdef SOH_BENCHMARK
+    // gSettings.ProbeSkipDraw=1 (§8.36): everything but the draw call itself.
+    if (mBenchSkipDraw == 1) {
+        return;
+    }
+#endif
     glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
 }
 
@@ -1354,6 +1366,12 @@ void GfxRenderingAPIOGL::StartFrame() {
         ForgetVertexAttribs(true);
     }
     mLeanGLState = lean;
+#ifdef SOH_BENCHMARK
+    // gSettings.ProbeSkipDraw (§8.36), benchmark builds only: how much of the render thread is the
+    // driver taking draws. 1 skips glDrawArrays in DrawTriangles; 2 skips DrawTriangles' GL work
+    // entirely. The interpreter still does all of its own. Wrong picture by design.
+    mBenchSkipDraw = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.ProbeSkipDraw", 0);
+#endif
 }
 
 void GfxRenderingAPIOGL::DiscardDepthStencil() {

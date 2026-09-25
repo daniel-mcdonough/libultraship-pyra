@@ -194,6 +194,7 @@ enum BenchCounter {
 };
 extern "C" uint32_t gBenchCounters[BENCH_COUNTER_COUNT];
 extern "C" uint64_t gBenchSwapMicros;
+extern "C" uint64_t gBenchEofCpuMicros;
 // When set, the renderer calls glFinish before the swap and times it, splitting "the GPU had not
 // finished the frame" from "presenting it took the time". Off by default: glFinish serialises CPU
 // and GPU, so it changes the thing being measured.

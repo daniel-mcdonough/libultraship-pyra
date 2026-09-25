@@ -160,6 +160,10 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
     // 2: also skip uniform uploads that would resend a program's current values.
     // 3: also draw from client-side vertex arrays instead of a glBufferData per draw.
     int mLeanGLState = 0;
+#ifdef SOH_BENCHMARK
+    // gSettings.ProbeSkipDraw, read each frame (report 8 §8.36).
+    int mBenchSkipDraw = 0;
+#endif
     // What the context's vertex attribute arrays are known to hold, for mode >= 1. GLES 2 has no
     // VAOs, so this is global context state; anything else that touches it must call
     // ForgetVertexAttribs, and StartFrame re-establishes it from nothing every frame.
