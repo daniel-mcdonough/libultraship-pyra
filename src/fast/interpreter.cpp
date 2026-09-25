@@ -5612,6 +5612,7 @@ void Interpreter::Run(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtx_r
     }
 
     Flush();
+    mRapi->FlushDeferredDraws();
     mGfxFrameBuffer = 0;
     currentDir = std::stack<std::string>();
 
