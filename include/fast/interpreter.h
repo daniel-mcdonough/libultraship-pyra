@@ -202,6 +202,12 @@ enum BenchCounter {
     BENCH_GRP_KEY_DUP,
     BENCH_GRP_TEX_CHG,
     BENCH_GRP_TEX_CHG_SORTED,
+    // gSettings.LeanGroup (§8.41): draws deferred into a bucket, glDrawArrays the replays issued,
+    // replays (flushes of a non-empty set of buckets) and the buckets they drew.
+    BENCH_LG_DEFERRED,
+    BENCH_LG_DRAWS,
+    BENCH_LG_FLUSHES,
+    BENCH_LG_BUCKETS,
     BENCH_COUNTER_COUNT
 };
 extern "C" uint32_t gBenchCounters[BENCH_COUNTER_COUNT];

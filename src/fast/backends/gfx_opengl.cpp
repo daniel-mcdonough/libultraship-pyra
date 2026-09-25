@@ -277,17 +277,21 @@ static void VertexArraySetAttribs(ShaderProgram* prg) {
 }
 
 void GfxRenderingAPIOGL::SetUniforms(ShaderProgram* prg) const {
+    SetUniformsTo(prg, mFrameCount, mCurrentNoiseScale);
+}
+
+// The program must be the one in use.
+void GfxRenderingAPIOGL::SetUniformsTo(ShaderProgram* prg, uint32_t frameCount, float noiseScale) const {
     if (mLeanGLState >= 2) {
-        if (prg->frameUniformsValid && prg->lastFrameCount == (int)mFrameCount &&
-            prg->lastNoiseScale == mCurrentNoiseScale) {
+        if (prg->frameUniformsValid && prg->lastFrameCount == (int)frameCount && prg->lastNoiseScale == noiseScale) {
             return;
         }
         prg->frameUniformsValid = true;
-        prg->lastFrameCount = (int)mFrameCount;
-        prg->lastNoiseScale = mCurrentNoiseScale;
+        prg->lastFrameCount = (int)frameCount;
+        prg->lastNoiseScale = noiseScale;
     }
-    glUniform1i(prg->frameCountLocation, mFrameCount);
-    glUniform1f(prg->noiseScaleLocation, mCurrentNoiseScale);
+    glUniform1i(prg->frameCountLocation, frameCount);
+    glUniform1f(prg->noiseScaleLocation, noiseScale);
 }
 
 // Mode >= 2: true when a uniform upload would change what the program holds, recording the new
@@ -301,16 +305,15 @@ template <typename T, size_t N> static bool UniformChanged(bool& valid, T (&last
     return true;
 }
 
-void GfxRenderingAPIOGL::SetPerDrawUniforms() {
-    ShaderProgram* prg = mCurrentShaderProgram;
+void GfxRenderingAPIOGL::SetPerDrawUniforms(ShaderProgram* prg, const GLuint* textureIds) {
     const bool lean = mLeanGLState >= 2;
     if (prg->usedTextures[0] || prg->usedTextures[1]) {
-        const GLint filtering[2] = { textures[mCurrentTextureIds[0]].filtering, textures[mCurrentTextureIds[1]].filtering };
+        const GLint filtering[2] = { textures[textureIds[0]].filtering, textures[textureIds[1]].filtering };
         if (prg->floatTexSize) {
-            const GLfloat size[4] = { (GLfloat)textures[mCurrentTextureIds[0]].width,
-                                      (GLfloat)textures[mCurrentTextureIds[0]].height,
-                                      (GLfloat)textures[mCurrentTextureIds[1]].width,
-                                      (GLfloat)textures[mCurrentTextureIds[1]].height };
+            const GLfloat size[4] = { (GLfloat)textures[textureIds[0]].width,
+                                      (GLfloat)textures[textureIds[0]].height,
+                                      (GLfloat)textures[textureIds[1]].width,
+                                      (GLfloat)textures[textureIds[1]].height };
             // Filtering and size are one group: both or neither, so the validity flag is shared.
             bool v1 = prg->texUniformsValid, v2 = prg->texUniformsValid;
             const bool fChanged = !lean || UniformChanged(v1, prg->lastFiltering, filtering);
@@ -323,8 +326,8 @@ void GfxRenderingAPIOGL::SetPerDrawUniforms() {
                 glUniform2fv(prg->texture_size_location, 2, size);
             }
         } else {
-            const GLint width[2] = { textures[mCurrentTextureIds[0]].width, textures[mCurrentTextureIds[1]].width };
-            const GLint height[2] = { textures[mCurrentTextureIds[0]].height, textures[mCurrentTextureIds[1]].height };
+            const GLint width[2] = { textures[textureIds[0]].width, textures[textureIds[1]].width };
+            const GLint height[2] = { textures[textureIds[0]].height, textures[textureIds[1]].height };
             bool v1 = prg->texUniformsValid, v2 = prg->texUniformsValid, v3 = prg->texUniformsValid;
             const bool fChanged = !lean || UniformChanged(v1, prg->lastFiltering, filtering);
             const bool wChanged = !lean || UniformChanged(v2, prg->lastTexWidth, width);
@@ -345,10 +348,10 @@ void GfxRenderingAPIOGL::SetPerDrawUniforms() {
     // Mask dimensions replace textureSize(), which GLSL ES 1.00 does not have.
     if (prg->usedTextures[2] || prg->usedTextures[3]) {
         if (prg->floatTexSize) {
-            const GLfloat size[4] = { (GLfloat)textures[mCurrentTextureIds[2]].width,
-                                      (GLfloat)textures[mCurrentTextureIds[2]].height,
-                                      (GLfloat)textures[mCurrentTextureIds[3]].width,
-                                      (GLfloat)textures[mCurrentTextureIds[3]].height };
+            const GLfloat size[4] = { (GLfloat)textures[textureIds[2]].width,
+                                      (GLfloat)textures[textureIds[2]].height,
+                                      (GLfloat)textures[textureIds[3]].width,
+                                      (GLfloat)textures[textureIds[3]].height };
             bool v = prg->maskUniformsValid;
             const bool changed = !lean || UniformChanged(v, prg->lastMaskSize, size);
             prg->maskUniformsValid = lean;
@@ -356,8 +359,8 @@ void GfxRenderingAPIOGL::SetPerDrawUniforms() {
                 glUniform2fv(prg->mask_size_location, 2, size);
             }
         } else {
-            const GLint width[2] = { textures[mCurrentTextureIds[2]].width, textures[mCurrentTextureIds[3]].width };
-            const GLint height[2] = { textures[mCurrentTextureIds[2]].height, textures[mCurrentTextureIds[3]].height };
+            const GLint width[2] = { textures[textureIds[2]].width, textures[textureIds[3]].width };
+            const GLint height[2] = { textures[textureIds[2]].height, textures[textureIds[3]].height };
             bool v1 = prg->maskUniformsValid, v2 = prg->maskUniformsValid;
             const bool wChanged = !lean || UniformChanged(v1, prg->lastMaskWidth, width);
             const bool hChanged = !lean || UniformChanged(v2, prg->lastMaskHeight, height);
@@ -373,6 +376,10 @@ void GfxRenderingAPIOGL::SetPerDrawUniforms() {
 }
 
 void GfxRenderingAPIOGL::UnloadShader(ShaderProgram* old_prg) {
+    if (mLeanGroup) {
+        // mLastLoadedShader is what the context holds; the program is applied at the draw.
+        return;
+    }
     if (mLeanGLState >= 1) {
         // The next LoadShader disables only what the new program does not use.
         if (old_prg != nullptr && old_prg == mLastLoadedShader) {
@@ -393,12 +400,16 @@ void GfxRenderingAPIOGL::UnloadShader(ShaderProgram* old_prg) {
 // Mode >= 1: bring the context's attribute arrays to what `prg` needs, touching only what differs.
 // The layout is the same as VertexArraySetAttribs'; programs with the same attribute sizes share
 // pointers, and most consecutive programs enable the same locations.
-void GfxRenderingAPIOGL::SetVertexAttribsLean(ShaderProgram* prg) {
+void GfxRenderingAPIOGL::SetVertexAttribsLean(ShaderProgram* prg, const float* clientBase) {
     // Mode 3 sources vertices from the interpreter's own array; before its first draw the address
-    // is not known yet, and DrawTriangles re-applies the attributes once it is.
-    const bool client = mLeanGLState >= 3 && mClientVertexBase != nullptr;
+    // is not known yet, and DrawTriangles re-applies the attributes once it is. LeanGroup's replay
+    // passes its own array.
+    if (clientBase == nullptr) {
+        clientBase = mClientVertexBase;
+    }
+    const bool client = mLeanGLState >= 3 && clientBase != nullptr;
     BindArrayBuffer(client ? 0 : mOpenglVbo);
-    const uintptr_t base = client ? (uintptr_t)mClientVertexBase : 0;
+    const uintptr_t base = client ? (uintptr_t)clientBase : 0;
     const uint16_t stride = (uint16_t)(prg->numFloats * sizeof(float));
     uint32_t want = 0;
     size_t pos = 0;
@@ -462,6 +473,12 @@ void GfxRenderingAPIOGL::LoadShader(ShaderProgram* new_prg) {
     BENCH_COUNT(BENCH_SHADER_LOADS, 1);
     // if (!new_prg) return;
     mCurrentShaderProgram = new_prg;
+    if (mLeanGroup) {
+        // The ungrouped path would upload these now and leave them until the program's next load.
+        new_prg->groupFrameCount = mFrameCount;
+        new_prg->groupNoiseScale = mCurrentNoiseScale;
+        return;
+    }
     if (new_prg != mLastLoadedShader) {
         glUseProgram(new_prg->openglProgramId);
         if (mLeanGLState >= 1) {
@@ -1020,6 +1037,11 @@ ShaderProgram* GfxRenderingAPIOGL::CreateAndLoadNewShader(uint64_t shader_id0, u
     }
 
     LoadShader(prg);
+    if (mLeanGroup) {
+        // The sampler uniforms below go to the program in use.
+        glUseProgram(prg->openglProgramId);
+        mLastLoadedShader = prg;
+    }
 
     if (cc_features.usedTextures[0]) {
         GLint sampler_location = glGetUniformLocation(shader_program, "uTex0");
@@ -1050,6 +1072,8 @@ ShaderProgram* GfxRenderingAPIOGL::CreateAndLoadNewShader(uint64_t shader_id0, u
 }
 
 void GfxRenderingAPIOGL::ClearShaderCache() {
+    // The buckets hold programs that are about to be deleted.
+    FlushGroups();
     // Texture filtering is compiled into the shader source (o_three_point_filtering) but is not
     // part of the variant key, so changing it at runtime requires throwing the cache away. The
     // caller is responsible for also dropping every ShaderProgram* held elsewhere - see
@@ -1088,17 +1112,50 @@ GLuint GfxRenderingAPIOGL::NewTexture() {
 }
 
 void GfxRenderingAPIOGL::DeleteTexture(uint32_t texID) {
+    if (GroupUsesTexture(texID)) {
+        FlushGroups();
+    }
     glDeleteTextures(1, &texID);
+    if (mLeanGroup) {
+        // Deleting a bound texture binds 0 in its place.
+        for (auto& bound : mLastBoundTextures) {
+            if (bound == texID) {
+                bound = 0;
+            }
+        }
+    }
 }
 
 // The same shadow SelectTexture elides binds with. It is cleared at every frame start and on any
 // change of LeanGLState, so a texture bound by anything outside the backend (ImGui) reads unbound.
 bool GfxRenderingAPIOGL::IsTextureBound(int tile, uint32_t textureId) {
+    if (mLeanGroup) {
+        // Binding is lazy in this mode: the draw binds whatever the unit was last given.
+        return textureId != 0 && tile >= 0 && tile < SHADER_MAX_TEXTURES && mCurrentTextureIds[tile] == textureId;
+    }
     return textureId != 0 && tile >= 0 && tile < SHADER_MAX_TEXTURES && mLastBoundTextures[tile] == textureId &&
            mCurrentTextureIds[tile] == textureId;
 }
 
+// Leaves `unit` active only if it had to bind.
+void GfxRenderingAPIOGL::BindUnit(int unit, GLuint texture_id) {
+    if (mLastBoundTextures[unit] == texture_id) {
+        return;
+    }
+    if (mLastActiveTexture != unit) {
+        mLastActiveTexture = unit;
+        glActiveTexture(GL_TEXTURE0 + unit);
+    }
+    mLastBoundTextures[unit] = texture_id;
+    glBindTexture(GL_TEXTURE_2D, texture_id);
+}
+
 void GfxRenderingAPIOGL::SelectTexture(int tile, GLuint texture_id) {
+    if (mLeanGroup) {
+        mCurrentTextureIds[tile] = texture_id;
+        mCurrentTile = tile;
+        return;
+    }
     if (mLastActiveTexture != tile) {
         mLastActiveTexture = tile;
         glActiveTexture(GL_TEXTURE0 + tile);
@@ -1114,6 +1171,16 @@ void GfxRenderingAPIOGL::SelectTexture(int tile, GLuint texture_id) {
 void GfxRenderingAPIOGL::UploadTexture(const uint8_t* rgba32_buf, uint32_t width, uint32_t height) {
     BENCH_COUNT(BENCH_TEX_UPLOADS, 1);
     BENCH_COUNT(BENCH_TEX_UPLOAD_KB, (width * height * 4) / 1024);
+    if (mLeanGroup) {
+        if (GroupUsesTexture(mCurrentTextureIds[mCurrentTile])) {
+            FlushGroups();
+        }
+        BindUnit(mCurrentTile, mCurrentTextureIds[mCurrentTile]);
+        if (mLastActiveTexture != mCurrentTile) {
+            mLastActiveTexture = mCurrentTile;
+            glActiveTexture(GL_TEXTURE0 + mCurrentTile);
+        }
+    }
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba32_buf);
     textures[mCurrentTextureIds[mCurrentTile]].width = width;
     textures[mCurrentTextureIds[mCurrentTile]].height = height;
@@ -1149,6 +1216,13 @@ static uint32_t gfx_cm_to_opengl(uint32_t val) {
 }
 
 void GfxRenderingAPIOGL::SetSamplerParameters(int tile, bool linear_filter, uint32_t cms, uint32_t cmt) {
+    if (mLeanGroup) {
+        // Sampler state lives in the texture object, and its filtering reaches the uniforms.
+        if (GroupUsesTexture(mCurrentTextureIds[tile])) {
+            FlushGroups();
+        }
+        BindUnit(tile, mCurrentTextureIds[tile]);
+    }
     if (mLastActiveTexture != tile) {
         mLastActiveTexture = tile;
         glActiveTexture(GL_TEXTURE0 + tile);
@@ -1171,15 +1245,21 @@ void GfxRenderingAPIOGL::SetZmodeDecal(bool zmode_decal) {
 }
 
 void GfxRenderingAPIOGL::SetViewport(int x, int y, int width, int height) {
+    FlushGroups();
     glViewport(x, y, width, height);
 }
 
 void GfxRenderingAPIOGL::SetScissor(int x, int y, int width, int height) {
+    FlushGroups();
     glScissor(x, y, width, height);
 }
 
 void GfxRenderingAPIOGL::SetUseAlpha(bool use_alpha) {
     int8_t val = use_alpha ? 1 : 0;
+    if (mLeanGroup) {
+        mLastBlendEnabled = val; // applied at the draw
+        return;
+    }
     if (mLastBlendEnabled != val) {
         mLastBlendEnabled = val;
         if (use_alpha) {
@@ -1220,6 +1300,10 @@ void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size
         }
     }
 #endif
+    if (mLeanGroup) {
+        DrawTrianglesGrouped(buf_vbo, buf_vbo_len, buf_vbo_num_tris);
+        return;
+    }
     if (mCurrentDepthTest != mLastDepthTest || mCurrentDepthMask != mLastDepthMask) {
         mLastDepthTest = mCurrentDepthTest;
         mLastDepthMask = mCurrentDepthMask;
@@ -1269,7 +1353,7 @@ void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size
         }
     }
 
-    SetPerDrawUniforms();
+    SetPerDrawUniforms(mCurrentShaderProgram, mCurrentTextureIds);
 
     // printf("flushing %d tris\n", buf_vbo_num_tris);
     // On the PowerVR SGX544, orphaning the VBO with one glBufferData per draw looked harmless in a
@@ -1399,6 +1483,275 @@ void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size
 #endif
 }
 
+// gSettings.LeanGroup (§8.41). The ungrouped path above sets depth and polygon-offset state only
+// when the interpreter's value differs from its shadow, with rules that make the result depend on
+// history (the depth function follows the decal flag only when test or mask change; a clear leaves
+// the mask at the interpreter's value behind the shadow's back). Rather than fix that, this runs
+// the same rules without the GL calls, so every draw gets exactly the state it would have had.
+void GfxRenderingAPIOGL::UpdateOwedDepthState() {
+    if (mCurrentDepthTest != mLastDepthTest || mCurrentDepthMask != mLastDepthMask) {
+        mLastDepthTest = mCurrentDepthTest;
+        mLastDepthMask = mCurrentDepthMask;
+        if (mCurrentDepthTest || mLastDepthMask) {
+            mOwedDepthOn = 1;
+            mOwedDepthMask = mLastDepthMask ? 1 : 0;
+            mOwedDepthFunc = mCurrentDepthTest ? (mCurrentZmodeDecal ? GL_LEQUAL : GL_LESS) : GL_ALWAYS;
+        } else {
+            mOwedDepthOn = 0;
+        }
+    }
+    if (mCurrentZmodeDecal != mLastZmodeDecal) {
+        mLastZmodeDecal = mCurrentZmodeDecal;
+        if (mCurrentZmodeDecal) {
+            // As in DrawTriangles.
+            const int n64modeFactor = 120;
+            const int noVanishFactor = 100;
+            GLfloat SSDB = -2;
+            switch (Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(CVAR_Z_FIGHTING_MODE, 0)) {
+                case 1:
+                    if (mFrameBuffers.size() > mCurrentFrameBuffer) {
+                        SSDB = -1.0f * (GLfloat)mFrameBuffers[mCurrentFrameBuffer].height / n64modeFactor;
+                    }
+                    break;
+                case 2:
+                    if (mFrameBuffers.size() > mCurrentFrameBuffer) {
+                        SSDB = -1.0f * (GLfloat)mFrameBuffers[mCurrentFrameBuffer].height / noVanishFactor;
+                    }
+                    break;
+                case 0:
+                default:
+                    SSDB = -2;
+            }
+            mOwedOffsetOn = 1;
+            mOwedOffsetFactor = SSDB;
+        } else {
+            mOwedOffsetOn = 0;
+        }
+    }
+}
+
+void GfxRenderingAPIOGL::ApplyFixedState(int8_t depthOn, int8_t depthMask, GLenum depthFunc, int8_t offsetOn,
+                                         float offsetFactor, int8_t blend) {
+    if (depthOn == 1) {
+        if (mGLDepthOn != 1) {
+            glEnable(GL_DEPTH_TEST);
+            mGLDepthOn = 1;
+        }
+        if (mGLDepthMask != depthMask) {
+            glDepthMask(depthMask == 1 ? GL_TRUE : GL_FALSE);
+            mGLDepthMask = depthMask;
+        }
+        if (mGLDepthFunc != depthFunc) {
+            glDepthFunc(depthFunc);
+            mGLDepthFunc = depthFunc;
+        }
+    } else if (mGLDepthOn != 0) {
+        glDisable(GL_DEPTH_TEST);
+        mGLDepthOn = 0;
+    }
+    if (offsetOn == 1) {
+        if (!mGLOffsetFactorKnown || mGLOffsetFactor != offsetFactor) {
+            glPolygonOffset(offsetFactor, -2);
+            mGLOffsetFactor = offsetFactor;
+            mGLOffsetFactorKnown = true;
+        }
+        if (mGLOffsetOn != 1) {
+            glEnable(GL_POLYGON_OFFSET_FILL);
+            mGLOffsetOn = 1;
+        }
+    } else if (mGLOffsetOn != 0) {
+        glDisable(GL_POLYGON_OFFSET_FILL);
+        mGLOffsetOn = 0;
+    }
+    if (mGLBlend != blend) {
+        if (blend == 1) {
+            glEnable(GL_BLEND);
+        } else {
+            glDisable(GL_BLEND);
+        }
+        mGLBlend = blend;
+    }
+}
+
+void GfxRenderingAPIOGL::ApplyProgramAndTextures(ShaderProgram* prg, const GLuint* textureIds, uint32_t frameCount,
+                                                 float noiseScale, const float* clientBase) {
+    if (mLastLoadedShader != prg) {
+        glUseProgram(prg->openglProgramId);
+        mLastLoadedShader = prg;
+    }
+    SetVertexAttribsLean(prg, clientBase);
+    SetUniformsTo(prg, frameCount, noiseScale);
+    for (int u = 0; u < SHADER_MAX_TEXTURES; u++) {
+        if (prg->usedTextures[u]) {
+            BindUnit(u, textureIds[u]);
+        }
+    }
+    SetPerDrawUniforms(prg, textureIds);
+}
+
+bool GfxRenderingAPIOGL::GroupUsesTexture(GLuint textureId) const {
+    for (size_t i = 0; i < mGroupBucketCount; i++) {
+        for (GLuint t : mGroupBuckets[i].tex) {
+            if (t == textureId) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void GfxRenderingAPIOGL::DrawTrianglesGrouped(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris) {
+    UpdateOwedDepthState();
+    ShaderProgram* prg = mCurrentShaderProgram;
+    const size_t stride = prg->numFloats;
+    const bool groupable = mOwedDepthOn == 1 && mOwedDepthMask == 1 && mOwedDepthFunc == GL_LESS &&
+                           mOwedOffsetOn == 0 && mLastBlendEnabled != 1 && buf_vbo_len > 0 &&
+                           buf_vbo_len + kGroupChunkFloats + stride <= kGroupArenaFloats;
+    if (!groupable) {
+        FlushGroups();
+        ApplyFixedState(mOwedDepthOn, mOwedDepthMask, mOwedDepthFunc, mOwedOffsetOn, mOwedOffsetFactor,
+                        mLastBlendEnabled == 1 ? 1 : 0);
+        mClientVertexBase = buf_vbo;
+        ApplyProgramAndTextures(prg, mCurrentTextureIds, prg->groupFrameCount, prg->groupNoiseScale, buf_vbo);
+        glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
+        return;
+    }
+    BENCH_COUNT(BENCH_LG_DEFERRED, 1);
+
+    // The key: the program, and every texture the draw reads - sampled, or read for the size and
+    // filtering uniforms, which SetPerDrawUniforms takes in pairs - and the frame uniforms the
+    // program would hold.
+    GLuint key[SHADER_MAX_TEXTURES];
+    const bool pair0 = prg->usedTextures[0] || prg->usedTextures[1];
+    const bool pair1 = prg->usedTextures[2] || prg->usedTextures[3];
+    for (int u = 0; u < SHADER_MAX_TEXTURES; u++) {
+        const bool read = u < 2 ? pair0 : u < 4 ? pair1 : prg->usedTextures[u];
+        key[u] = read ? mCurrentTextureIds[u] : 0;
+    }
+    if (mGroupArenaUsed + buf_vbo_len + kGroupChunkFloats + stride > kGroupArenaFloats) {
+        FlushGroups();
+    }
+    GroupBucket* b = nullptr;
+    for (size_t i = 0; i < mGroupBucketCount; i++) {
+        GroupBucket& c = mGroupBuckets[i];
+        if (c.prg == prg && c.frameCount == prg->groupFrameCount && c.noiseScale == prg->groupNoiseScale &&
+            memcmp(c.tex, key, sizeof(key)) == 0) {
+            b = &c;
+            break;
+        }
+    }
+    if (b == nullptr) {
+        if (mGroupBucketCount == mGroupBuckets.size()) {
+            mGroupBuckets.emplace_back();
+        }
+        b = &mGroupBuckets[mGroupBucketCount++];
+        b->prg = prg;
+        memcpy(b->tex, key, sizeof(key));
+        b->frameCount = prg->groupFrameCount;
+        b->noiseScale = prg->groupNoiseScale;
+        b->chunkStart = b->chunkEnd = b->chunkCap = 0;
+        b->segs.clear();
+        BENCH_COUNT(BENCH_LG_BUCKETS, 1);
+    }
+    if (b->chunkCap - b->chunkEnd < buf_vbo_len) {
+        // Twice the bucket's last chunk, or the draw if larger; just the draw if the arena is short.
+        size_t grow = std::max(buf_vbo_len, std::max(kGroupChunkFloats, 2 * (b->chunkCap - b->chunkStart)));
+        if (mGroupArenaUsed + grow + stride > kGroupArenaFloats) {
+            grow = buf_vbo_len;
+        }
+        grow = (grow + stride - 1) / stride * stride;
+        if (!b->segs.empty() && b->chunkCap == mGroupArenaUsed) {
+            // The arena's last chunk: grow it in place.
+            b->chunkCap += grow;
+        } else {
+            // A new chunk, starting on a whole vertex of this program's stride so that it can be drawn
+            // with a `first` from the arena's start. Costs one more glDrawArrays.
+            const size_t start = (mGroupArenaUsed + stride - 1) / stride * stride;
+            b->chunkStart = b->chunkEnd = start;
+            b->chunkCap = start + grow;
+            b->segs.push_back({ (uint32_t)(start / stride), 0 });
+        }
+        mGroupArenaUsed = b->chunkCap;
+    }
+    memcpy(mGroupArena.get() + b->chunkEnd, buf_vbo, buf_vbo_len * sizeof(float));
+    b->chunkEnd += buf_vbo_len;
+    b->segs.back().count += (uint32_t)(3 * buf_vbo_num_tris);
+}
+
+void GfxRenderingAPIOGL::FlushGroups() {
+    if (mGroupBucketCount == 0) {
+        return;
+    }
+    BENCH_COUNT(BENCH_LG_FLUSHES, 1);
+    // Every deferred draw had this state; nothing else about it differs between them.
+    ApplyFixedState(1, 1, GL_LESS, 0, 0.0f, 0);
+    for (size_t i = 0; i < mGroupBucketCount; i++) {
+        GroupBucket& b = mGroupBuckets[i];
+        ApplyProgramAndTextures(b.prg, b.tex, b.frameCount, b.noiseScale, mGroupArena.get());
+        for (const GroupSeg& seg : b.segs) {
+            BENCH_COUNT(BENCH_LG_DRAWS, 1);
+            glDrawArrays(GL_TRIANGLES, seg.first, seg.count);
+        }
+    }
+    mGroupBucketCount = 0;
+    mGroupArenaUsed = 0;
+}
+
+void GfxRenderingAPIOGL::FlushDeferredDraws() {
+    FlushGroups();
+}
+
+// Between frames, with nothing deferred. The two paths keep their shadows differently, so the
+// context is brought to what the path being entered assumes.
+void GfxRenderingAPIOGL::SetLeanGroup(int mode) {
+    if (mode == mLeanGroup) {
+        return;
+    }
+    FlushGroups();
+    // Both: the depth and offset state is recomputed at the next draw.
+    mLastDepthTest = -1;
+    mLastDepthMask = -1;
+    mLastZmodeDecal = -1;
+    if (mode) {
+        if (!mGroupArena) {
+            mGroupArena.reset(new float[kGroupArenaFloats]);
+        }
+        // The ungrouped path's shadows describe the context, except where they read unknown.
+        mGLDepthOn = mGLDepthMask = mGLOffsetOn = -1;
+        mGLDepthFunc = 0;
+        mGLOffsetFactorKnown = false;
+        mGLBlend = mLastBlendEnabled;
+        for (auto& p : mShaderProgramPool) {
+            p.second.groupFrameCount = p.second.lastFrameCount;
+            p.second.groupNoiseScale = p.second.lastNoiseScale;
+        }
+    } else {
+        // The ungrouped path binds, switches programs and sets blend when told to, and assumes the
+        // context already holds what it was last told.
+        const int8_t blend = mLastBlendEnabled == 1 ? 1 : 0;
+        if (mGLBlend != blend) {
+            if (blend) {
+                glEnable(GL_BLEND);
+            } else {
+                glDisable(GL_BLEND);
+            }
+        }
+        for (int u = 0; u < SHADER_MAX_TEXTURES; u++) {
+            BindUnit(u, mCurrentTextureIds[u]);
+        }
+        if (mCurrentShaderProgram != nullptr) {
+            if (mLastLoadedShader != mCurrentShaderProgram) {
+                glUseProgram(mCurrentShaderProgram->openglProgramId);
+                mLastLoadedShader = mCurrentShaderProgram;
+            }
+            SetVertexAttribsLean(mCurrentShaderProgram);
+            SetUniformsTo(mCurrentShaderProgram, mCurrentShaderProgram->groupFrameCount,
+                          mCurrentShaderProgram->groupNoiseScale);
+        }
+    }
+    mLeanGroup = mode;
+}
+
 void GfxRenderingAPIOGL::Init() {
 #if !defined(__linux__) && !defined(__OpenBSD__)
     glewInit();
@@ -1464,6 +1817,7 @@ void GfxRenderingAPIOGL::OnResize() {
 }
 
 void GfxRenderingAPIOGL::StartFrame() {
+    FlushGroups();
 #ifdef SOH_BENCHMARK
     gBenchFbEpoch++;
 #endif
@@ -1484,6 +1838,11 @@ void GfxRenderingAPIOGL::StartFrame() {
         ForgetVertexAttribs(true);
     }
     mLeanGLState = lean;
+    // gSettings.LeanGroup (§8.41): defer groupable draws and replay them grouped by program and
+    // textures. Only on client arrays, which it draws from.
+    const int group =
+        Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanGroup", 0);
+    SetLeanGroup(lean >= 3 && group != 0 ? 1 : 0);
 #ifdef SOH_BENCHMARK
     // gSettings.ProbeSkipDraw (§8.36), benchmark builds only: how much of the render thread is the
     // driver taking draws. 1 skips glDrawArrays in DrawTriangles; 2 skips DrawTriangles' GL work
@@ -1498,6 +1857,7 @@ void GfxRenderingAPIOGL::StartFrame() {
 }
 
 void GfxRenderingAPIOGL::DiscardDepthStencil() {
+    FlushGroups();
 #ifdef USE_OPENGLES2
     if (sDiscardFramebufferEXT == nullptr) {
         return;
@@ -1517,6 +1877,7 @@ void GfxRenderingAPIOGL::DiscardDepthStencil() {
 }
 
 void GfxRenderingAPIOGL::EndFrame() {
+    FlushGroups();
     // The frame is finished and the buffer swap is next, so the default framebuffer's depth and
     // stencil are dead. Colour is left alone - it is what gets presented.
     DiscardDepthStencil();
@@ -1571,7 +1932,20 @@ void GfxRenderingAPIOGL::DumpFramebuffer(int fb_id, const char* path) {
 void GfxRenderingAPIOGL::FinishRender() {
 }
 
+// A texture binding changed behind the shadow, on whichever unit is active. The ungrouped path
+// never noticed; LeanGroup binds lazily and has to.
+static void ForgetActiveBinding(int8_t activeUnit, GLuint* lastBound) {
+    if (activeUnit >= 0) {
+        lastBound[activeUnit] = 0;
+    } else {
+        for (int u = 0; u < SHADER_MAX_TEXTURES; u++) {
+            lastBound[u] = 0;
+        }
+    }
+}
+
 int GfxRenderingAPIOGL::CreateFramebuffer() {
+    FlushGroups();
     GLuint clrbuf;
     glGenTextures(1, &clrbuf);
     glBindTexture(GL_TEXTURE_2D, clrbuf);
@@ -1579,6 +1953,9 @@ int GfxRenderingAPIOGL::CreateFramebuffer() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glBindTexture(GL_TEXTURE_2D, 0);
+    if (mLeanGroup) {
+        ForgetActiveBinding(mLastActiveTexture, mLastBoundTextures);
+    }
 
     GLuint clrbufMsaa;
     glGenRenderbuffers(1, &clrbufMsaa);
@@ -1606,6 +1983,7 @@ int GfxRenderingAPIOGL::CreateFramebuffer() {
 void GfxRenderingAPIOGL::UpdateFramebufferParameters(int fb_id, uint32_t width, uint32_t height, uint32_t msaa_level,
                                                      bool opengl_invertY, bool render_target, bool has_depth_buffer,
                                                      bool can_extract_depth) {
+    FlushGroups();
     FramebufferOGL& fb = mFrameBuffers[fb_id];
 
     width = std::max(width, 1U);
@@ -1621,6 +1999,9 @@ void GfxRenderingAPIOGL::UpdateFramebufferParameters(int fb_id, uint32_t width, 
                 glBindTexture(GL_TEXTURE_2D, fb.clrbuf);
                 glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
                 glBindTexture(GL_TEXTURE_2D, 0);
+                if (mLeanGroup) {
+                    ForgetActiveBinding(mLastActiveTexture, mLastBoundTextures);
+                }
                 glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fb.clrbuf, 0);
             } else {
                 glBindRenderbuffer(GL_RENDERBUFFER, fb.clrbufMsaa);
@@ -1656,6 +2037,7 @@ void GfxRenderingAPIOGL::UpdateFramebufferParameters(int fb_id, uint32_t width, 
 }
 
 void GfxRenderingAPIOGL::StartDrawToFramebuffer(int fb_id, float noise_scale) {
+    FlushGroups();
 #ifdef SOH_BENCHMARK
     gBenchFbEpoch++;
 #endif
@@ -1670,6 +2052,7 @@ void GfxRenderingAPIOGL::StartDrawToFramebuffer(int fb_id, float noise_scale) {
 }
 
 void GfxRenderingAPIOGL::ClearFramebuffer(bool color, bool depth) {
+    FlushGroups();
 #ifdef SOH_BENCHMARK
     gBenchFbEpoch++;
 #endif
@@ -1682,6 +2065,11 @@ void GfxRenderingAPIOGL::ClearFramebuffer(bool color, bool depth) {
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear((color ? GL_COLOR_BUFFER_BIT : 0) | (depth ? GL_DEPTH_BUFFER_BIT : 0));
     glDepthMask(mCurrentDepthMask ? GL_TRUE : GL_FALSE);
+    if (mLeanGroup) {
+        // The ungrouped path leaves the mask here, behind its shadow's back, until test or mask next
+        // change; the next draws are owed that.
+        mGLDepthMask = mOwedDepthMask = mCurrentDepthMask ? 1 : 0;
+    }
     if (mLastScissorEnabled != 1) {
         mLastScissorEnabled = 1;
         glEnable(GL_SCISSOR_TEST);
@@ -1789,10 +2177,23 @@ void GfxRenderingAPIOGL::BlitFramebufferAsQuad(GLuint dstFbo, GLuint srcTex, flo
     for (auto& tex : mLastBoundTextures) {
         tex = 0;
     }
+    // LeanGroup: what the ungrouped path now has in the context (the blend follows mLastBlendEnabled
+    // reading -1, and the depth state is recomputed at the next draw) and what the context holds.
+    mOwedDepthOn = 0;
+    mOwedDepthMask = 0;
+    mGLDepthOn = 0;
+    mGLDepthMask = 0;
+    mGLBlend = 0;
+    if (mLeanGroup) {
+        // Binding is lazy there, so the shadow has to be true, not merely safe.
+        mLastActiveTexture = 0;
+        mLastBoundTextures[0] = srcTex;
+    }
 }
 #endif
 
 void GfxRenderingAPIOGL::ResolveMSAAColorBuffer(int fb_id_target, int fb_id_source) {
+    FlushGroups();
 #ifdef SOH_BENCHMARK
     gBenchFbEpoch++;
 #endif
@@ -1828,6 +2229,7 @@ void* GfxRenderingAPIOGL::GetFramebufferTextureId(int fb_id) {
 }
 
 void GfxRenderingAPIOGL::SelectTextureFb(int fb_id) {
+    FlushGroups();
 #ifdef SOH_BENCHMARK
     gBenchFbEpoch++;
 #endif
@@ -1838,6 +2240,7 @@ void GfxRenderingAPIOGL::SelectTextureFb(int fb_id) {
 
 void GfxRenderingAPIOGL::CopyFramebuffer(int fb_dst_id, int fb_src_id, int srcX0, int srcY0, int srcX1, int srcY1,
                                          int dstX0, int dstY0, int dstX1, int dstY1) {
+    FlushGroups();
 #ifdef SOH_BENCHMARK
     gBenchFbEpoch++;
 #endif
@@ -1928,6 +2331,7 @@ void GfxRenderingAPIOGL::CopyFramebuffer(int fb_dst_id, int fb_src_id, int srcX0
 }
 
 void GfxRenderingAPIOGL::ReadFramebufferToCPU(int fb_id, uint32_t width, uint32_t height, uint16_t* rgba16_buf) {
+    FlushGroups();
     BENCH_COUNT(BENCH_FB_READBACKS, 1);
     if (fb_id >= (int)mFrameBuffers.size()) {
         return;
@@ -1959,6 +2363,7 @@ void GfxRenderingAPIOGL::ReadFramebufferToCPU(int fb_id, uint32_t width, uint32_
 
 std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff>
 GfxRenderingAPIOGL::GetPixelDepth(int fb_id, const std::set<std::pair<float, float>>& coordinates) {
+    FlushGroups();
     std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff> res;
 
     FramebufferOGL& fb = mFrameBuffers[fb_id];

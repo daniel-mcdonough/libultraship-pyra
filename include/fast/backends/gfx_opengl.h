@@ -2,6 +2,7 @@
 #pragma once
 
 #include "gfx_rendering_api.h"
+#include <memory>
 #include "../interpreter.h"
 
 #ifdef _MSC_VER
@@ -78,6 +79,10 @@ struct ShaderProgram {
     GLint lastMaskWidth[2] = {}, lastMaskHeight[2] = {};
     int lastFrameCount = 0;
     float lastNoiseScale = 0.0f;
+    // gSettings.LeanGroup: the frame count and noise scale LoadShader would have uploaded, i.e. the
+    // values the ungrouped path leaves in the program until its next load (§8.41).
+    uint32_t groupFrameCount = 0;
+    float groupNoiseScale = 0.0f;
 };
 
 struct FramebufferOGL {
@@ -135,6 +140,7 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
     void ClearFramebuffer(bool color, bool depth) override;
     void DiscardDepthStencil() override;
     void ClearShaderCache() override;
+    void FlushDeferredDraws() override;
     void ReadFramebufferToCPU(int fbId, uint32_t width, uint32_t height, uint16_t* rgba16Buf) override;
     void ResolveMSAAColorBuffer(int fbIdTarger, int fbIdSrc) override;
     std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff>
@@ -149,9 +155,10 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
 
   private:
     void SetUniforms(ShaderProgram* prg) const;
+    void SetUniformsTo(ShaderProgram* prg, uint32_t frameCount, float noiseScale) const;
     std::string BuildFsShader(const CCFeatures& cc_features, int shaderOpts);
-    void SetPerDrawUniforms();
-    void SetVertexAttribsLean(ShaderProgram* prg);
+    void SetPerDrawUniforms(ShaderProgram* prg, const GLuint* textureIds);
+    void SetVertexAttribsLean(ShaderProgram* prg, const float* clientBase = nullptr);
     void ForgetVertexAttribs(bool disableAll);
     void BindArrayBuffer(GLuint buffer);
 
@@ -161,6 +168,58 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
     // 2: also skip uniform uploads that would resend a program's current values.
     // 3: also draw from client-side vertex arrays instead of a glBufferData per draw.
     int mLeanGLState = 0;
+
+    // gSettings.LeanGroup (report 8 §8.41), read once per frame, only with LeanGLState 3. A draw
+    // whose state is groupable - depth test on with GL_LESS, depth writes, no polygon offset, no
+    // blend - is not drawn but appended to a bucket keyed by its program and textures. Anything
+    // that could change what such a draw sees, or that needs it drawn (a draw that is not
+    // groupable, a sampler, upload or delete touching a bucket's texture, any framebuffer, viewport
+    // or scissor change, a clear, the end of the interpreter's frame), first replays the buckets in
+    // the order each first appeared, one glDrawArrays per bucket.
+    //
+    // Binds, program switches and blend changes are applied lazily at the draw in this mode, so
+    // the m*Last* shadows below describe what the ungrouped path would have set (the state each
+    // draw is owed, quirks included) and the mGL* shadows what the context holds.
+    int mLeanGroup = 0;
+    void DrawTrianglesGrouped(float buf_vbo[], size_t buf_vbo_len, size_t buf_vbo_num_tris);
+    void UpdateOwedDepthState();
+    void ApplyFixedState(int8_t depthOn, int8_t depthMask, GLenum depthFunc, int8_t offsetOn, float offsetFactor,
+                         int8_t blend);
+    void ApplyProgramAndTextures(ShaderProgram* prg, const GLuint* textureIds, uint32_t frameCount,
+                                 float noiseScale, const float* clientBase);
+    void BindUnit(int unit, GLuint textureId);
+    bool GroupUsesTexture(GLuint textureId) const;
+    void FlushGroups();
+    void SetLeanGroup(int mode);
+    // What the ungrouped path would have in the context at the next draw.
+    int8_t mOwedDepthOn = -1, mOwedDepthMask = -1, mOwedOffsetOn = -1;
+    GLenum mOwedDepthFunc = GL_LEQUAL;
+    float mOwedOffsetFactor = 0.0f;
+    // What the context holds (-1: unknown).
+    int8_t mGLDepthOn = -1, mGLDepthMask = -1, mGLOffsetOn = -1, mGLBlend = -1;
+    GLenum mGLDepthFunc = 0;
+    float mGLOffsetFactor = 0.0f;
+    bool mGLOffsetFactorKnown = false;
+    struct GroupSeg {
+        uint32_t first, count; // vertices, in the bucket program's stride
+    };
+    struct GroupBucket {
+        ShaderProgram* prg;
+        GLuint tex[SHADER_MAX_TEXTURES];
+        uint32_t frameCount;
+        float noiseScale;
+        size_t chunkStart, chunkEnd, chunkCap; // floats into the arena: the current chunk, written, reserved
+        std::vector<GroupSeg> segs;
+    };
+    std::vector<GroupBucket> mGroupBuckets; // the first mGroupBucketCount are live; the rest are kept for reuse
+    size_t mGroupBucketCount = 0;
+    // One array for every bucket of a run, so the attribute pointers stay put across the replay
+    // (a changed pointer costs ~2.4 us at the next draw, §8.40). A bucket gets a chunk and grows
+    // in it; a full chunk gets another chunk and costs one more glDrawArrays.
+    static constexpr size_t kGroupArenaFloats = 1u << 22;
+    static constexpr size_t kGroupChunkFloats = 8192;
+    std::unique_ptr<float[]> mGroupArena;
+    size_t mGroupArenaUsed = 0;
 #ifdef SOH_BENCHMARK
     // gSettings.ProbeSkipDraw, read each frame (report 8 §8.36).
     int mBenchSkipDraw = 0;
@@ -193,7 +252,7 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
     const float* mClientVertexBase = nullptr;
 
     std::vector<TextureInfo> textures;
-    GLuint mCurrentTextureIds[SHADER_MAX_TEXTURES];
+    GLuint mCurrentTextureIds[SHADER_MAX_TEXTURES] = {};
     GLuint mLastBoundTextures[SHADER_MAX_TEXTURES] = {};
     uint8_t mCurrentTile;
     int8_t mLastActiveTexture = -1;
@@ -201,7 +260,7 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
     int8_t mLastScissorEnabled = -1;
 
     std::map<std::pair<uint64_t, uint32_t>, ShaderProgram> mShaderProgramPool;
-    ShaderProgram* mCurrentShaderProgram;
+    ShaderProgram* mCurrentShaderProgram = nullptr;
     ShaderProgram* mLastLoadedShader = nullptr;
 
     GLuint mOpenglVbo = 0;

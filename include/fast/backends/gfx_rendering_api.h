@@ -78,6 +78,10 @@ class GfxRenderingAPI {
     // frames, never with a draw in flight. Backends with no such cache need do nothing.
     virtual void ClearShaderCache() {
     }
+    // Draws anything the backend has deferred (the GLES2 backend's gSettings.LeanGroup). Called at
+    // the end of the interpreter's frame, before the GUI draws into the same context.
+    virtual void FlushDeferredDraws() {
+    }
     virtual void ReadFramebufferToCPU(int fbId, uint32_t width, uint32_t height, uint16_t* rgba16Buf) = 0;
     virtual void ResolveMSAAColorBuffer(int fbIdTarger, int fbIdSrc) = 0;
     virtual std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff>
