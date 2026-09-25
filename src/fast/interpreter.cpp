@@ -1678,8 +1678,9 @@ static int sLeanTexLoad = 1;
 // already bound in its unit - same cache entry, and the backend confirms the binding - does not
 // flush the batch. NEXT.md item H: the flush used to come before the texture was known. Nothing the
 // draw uses changes, so the batch carries on as one draw. Masked and blended textures take the old
-// path. 0 is the original.
-static int sLeanTexReuse = 0;
+// path. Default 1: 33 of the Market's 261 draws, -158 us (-1.1%) of its window CPU at 1000 MHz,
+// pixel-identical, and clean in real play. Set 0 to A/B against the original.
+static int sLeanTexReuse = 1;
 static const struct U8ToUnitTable {
     float v[256];
     U8ToUnitTable() {
@@ -5396,7 +5397,7 @@ bool Interpreter::ViewportMatchesRendererResolution() {
 void Interpreter::StartFrame() {
     sLeanGeom = Ship::Context::GetRawInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanGeom", 1);
     sLeanTexLoad = Ship::Context::GetRawInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanTexLoad", 1);
-    sLeanTexReuse = Ship::Context::GetRawInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanTexReuse", 0);
+    sLeanTexReuse = Ship::Context::GetRawInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanTexReuse", 1);
 #ifdef SOH_BENCHMARK
     sProbeSkipLight = Ship::Context::GetRawInstance()->GetConsoleVariables()->GetInteger("gSettings.ProbeSkipLight", 0);
 #endif
