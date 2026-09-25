@@ -40,6 +40,11 @@ class GfxRenderingAPI {
     virtual void ShaderGetInfo(ShaderProgram* prg, uint8_t* numInputs, bool usedTextures[2]) = 0;
     virtual uint32_t NewTexture() = 0;
     virtual void SelectTexture(int tile, uint32_t textureId) = 0;
+    // True only when the backend knows textureId is bound to this unit right now (§8.37). A backend
+    // that does not track its bindings says false, and the interpreter then binds as before.
+    virtual bool IsTextureBound(int tile, uint32_t textureId) {
+        return false;
+    }
     virtual void UploadTexture(const uint8_t* rgba32Buf, uint32_t width, uint32_t height) = 0;
     virtual void SetSamplerParameters(int sampler, bool linear_filter, uint32_t cms, uint32_t cmt) = 0;
     virtual void SetDepthTestAndMask(bool depth_test, bool z_upd) = 0;

@@ -1091,6 +1091,13 @@ void GfxRenderingAPIOGL::DeleteTexture(uint32_t texID) {
     glDeleteTextures(1, &texID);
 }
 
+// The same shadow SelectTexture elides binds with. It is cleared at every frame start and on any
+// change of LeanGLState, so a texture bound by anything outside the backend (ImGui) reads unbound.
+bool GfxRenderingAPIOGL::IsTextureBound(int tile, uint32_t textureId) {
+    return textureId != 0 && tile >= 0 && tile < SHADER_MAX_TEXTURES && mLastBoundTextures[tile] == textureId &&
+           mCurrentTextureIds[tile] == textureId;
+}
+
 void GfxRenderingAPIOGL::SelectTexture(int tile, GLuint texture_id) {
     if (mLastActiveTexture != tile) {
         mLastActiveTexture = tile;

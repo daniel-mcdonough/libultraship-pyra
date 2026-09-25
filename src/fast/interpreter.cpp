@@ -980,6 +980,36 @@ void Interpreter::ImportTextureRaw(int tile, bool importReplacement) {
     mRapi->UploadTexture(mTexUploadBuffer, resultNewLineSize / 4, resultNewHeight);
 }
 
+// LeanTexReuse (§8.37): would ImportTexture(i, tile, false) select the texture unit i already has?
+// The key is built exactly as ImportTexture builds it. On true, the entry is moved to the back of
+// the LRU as a cache hit would move it, so eviction order is unchanged.
+bool Interpreter::TextureAlreadyBound(int i, int tile) {
+    const TextureCacheNode* cur = mRenderingState.mTextures[i];
+    const uint32_t tmemIndex = mRdp->texture_tile[tile].tmem_index;
+    if (cur == nullptr || mRdp->loaded_texture[i].masked || mRdp->loaded_texture[i].blended) {
+        return false;
+    }
+    const uint8_t* addr = mRdp->loaded_texture[tmemIndex].addr;
+    if (addr == nullptr) {
+        return false;
+    }
+    const uint8_t fmt = mRdp->texture_tile[tile].fmt;
+    TextureCacheKey key;
+    if (fmt == G_IM_FMT_CI) {
+        key = { addr, { mRdp->palettes[0], mRdp->palettes[1] }, fmt, mRdp->texture_tile[tile].siz,
+                mRdp->texture_tile[tile].palette, mRdp->loaded_texture[tmemIndex].orig_size_bytes };
+    } else {
+        key = { addr, {}, fmt, mRdp->texture_tile[tile].siz, mRdp->texture_tile[tile].palette,
+                mRdp->loaded_texture[tmemIndex].orig_size_bytes };
+    }
+    TextureCacheMap::iterator it = mTextureCache.map.find(key);
+    if (it == mTextureCache.map.end() || &*it != cur || !mRapi->IsTextureBound(i, it->second.texture_id)) {
+        return false;
+    }
+    mTextureCache.lru.splice(mTextureCache.lru.end(), mTextureCache.lru, it->second.lru_location);
+    return true;
+}
+
 void Interpreter::ImportTexture(int i, int tile, bool importReplacement) {
     uint8_t fmt = mRdp->texture_tile[tile].fmt;
     uint8_t siz = mRdp->texture_tile[tile].siz;
@@ -1290,6 +1320,12 @@ static int sLeanGeom = 1;
 // 1: -596 us (-3.1%) of the Market's render thread and -561 us (-4.8%) at Hyrule Field at 1000 MHz,
 // pixel-identical to the unmodified build. Set 0 to A/B against the original.
 static int sLeanTexLoad = 1;
+// gSettings.LeanTexReuse (§8.37), read with LeanGeom: a texture reload that resolves to the texture
+// already bound in its unit - same cache entry, and the backend confirms the binding - does not
+// flush the batch. NEXT.md item H: the flush used to come before the texture was known. Nothing the
+// draw uses changes, so the batch carries on as one draw. Masked and blended textures take the old
+// path. 0 is the original.
+static int sLeanTexReuse = 0;
 static const struct U8ToUnitTable {
     float v[256];
     U8ToUnitTable() {
@@ -1728,6 +1764,9 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
     for (int i = 0; i < 2; i++) {
         uint32_t tile = mRdp->first_tile_index + i;
         if (comb->usedTextures[i]) {
+            if (mRdp->textures_changed[i] && sLeanTexReuse && TextureAlreadyBound(i, tile)) {
+                mRdp->textures_changed[i] = false;
+            }
             if (mRdp->textures_changed[i]) {
 #ifdef SOH_BENCHMARK
                 // Item H: this flush comes before the texture is known. TEX_SAME marks a reload that
@@ -4639,6 +4678,7 @@ bool Interpreter::ViewportMatchesRendererResolution() {
 void Interpreter::StartFrame() {
     sLeanGeom = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanGeom", 1);
     sLeanTexLoad = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanTexLoad", 1);
+    sLeanTexReuse = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanTexReuse", 0);
 #ifdef SOH_BENCHMARK
     sProbeSkipLight = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.ProbeSkipLight", 0);
 #endif
