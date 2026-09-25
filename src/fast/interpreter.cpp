@@ -134,6 +134,45 @@ void GfxSetInstance(std::shared_ptr<Interpreter> gfx) {
 // counted once, under every change that separated it from the previous one.
 static uint32_t sBenchBreak = 0;
 #define BENCH_BREAK(b) (sBenchBreak |= (b))
+
+// The run of groupable draws in progress (§8.40): each draw's texture set - the cache entries of the
+// textures its program samples, with their mask and blend textures - and its program.
+struct BenchGroupDraw {
+    const void* tex[SHADER_MAX_TEXTURES];
+    const void* prg;
+    bool SameTex(const BenchGroupDraw& o) const {
+        return memcmp(tex, o.tex, sizeof(tex)) == 0;
+    }
+};
+static std::vector<BenchGroupDraw> sBenchRun;
+static uint32_t sBenchRunFbEpoch = 0;
+
+static void BenchEndRun() {
+    const size_t n = sBenchRun.size();
+    if (n == 0) {
+        return;
+    }
+    size_t texDup = 0, keyDup = 0, texChg = 0;
+    for (size_t i = 0; i < n; i++) {
+        bool seenTex = false, seenKey = false;
+        for (size_t j = 0; j < i; j++) {
+            if (sBenchRun[j].SameTex(sBenchRun[i])) {
+                seenTex = true;
+                seenKey = seenKey || sBenchRun[j].prg == sBenchRun[i].prg;
+            }
+        }
+        texDup += seenTex;
+        keyDup += seenKey;
+        texChg += i > 0 && !sBenchRun[i - 1].SameTex(sBenchRun[i]);
+    }
+    BENCH_COUNT(BENCH_GRP_RUNS, 1);
+    BENCH_COUNT(BENCH_GRP_DRAWS, n);
+    BENCH_COUNT(BENCH_GRP_TEX_DUP, texDup);
+    BENCH_COUNT(BENCH_GRP_KEY_DUP, keyDup);
+    BENCH_COUNT(BENCH_GRP_TEX_CHG, texChg);
+    BENCH_COUNT(BENCH_GRP_TEX_CHG_SORTED, n - texDup - 1);
+    sBenchRun.clear();
+}
 #else
 #define BENCH_BREAK(b) ((void)0)
 #endif
@@ -1890,6 +1929,29 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
 #ifdef SOH_BENCHMARK
     if (mBufVboLen == 0) {
         gBenchBatchCause[sBenchBreak & (BENCH_BRK_SETS - 1)]++;
+        const bool groupable = depth_test && depth_mask && !zmode_decal && !use_alpha && !invisible;
+        if (!groupable || gBenchFbEpoch != sBenchRunFbEpoch ||
+            (sBenchBreak & (BENCH_BRK_VIEWPORT | BENCH_BRK_SCISSOR | BENCH_BRK_OTHER)) != 0) {
+            BenchEndRun();
+            sBenchRunFbEpoch = gBenchFbEpoch;
+        }
+        if (groupable) {
+            BenchGroupDraw d = {};
+            for (int i = 0; i < 2; i++) {
+                if (usedTextures[i]) {
+                    d.tex[i] = mRenderingState.mTextures[i];
+                    if (mRdp->loaded_texture[i].masked) {
+                        d.tex[SHADER_FIRST_MASK_TEXTURE + i] = mRenderingState.mTextures[SHADER_FIRST_MASK_TEXTURE + i];
+                    }
+                    if (mRdp->loaded_texture[i].blended) {
+                        d.tex[SHADER_FIRST_REPLACEMENT_TEXTURE + i] =
+                            mRenderingState.mTextures[SHADER_FIRST_REPLACEMENT_TEXTURE + i];
+                    }
+                }
+            }
+            d.prg = prg;
+            sBenchRun.push_back(d);
+        }
         sBenchBreak = 0;
     }
 #endif
@@ -4878,6 +4940,7 @@ uint64_t gBenchOpNanos[256] = {};
 int gBenchOpTime = 0;
 char gBenchDumpPath[512] = {};
 int gBenchDumpFb = 0;
+uint32_t gBenchFbEpoch = 0;
 uint64_t gBenchBatchCause[BENCH_BRK_SETS] = {};
 extern const char* const gBenchBatchCauseNames[BENCH_BRK_BITS] = { "depth",   "decal",   "viewport", "scissor",
                                                             "tex_new", "tex_same", "sampler", "program",

@@ -190,6 +190,18 @@ enum BenchCounter {
     BENCH_MTX,
     BENCH_MTX_REPL,
     BENCH_MTX_MAP,
+    // Grouping by texture (§8.40). A run is a maximal sequence of consecutive draws that are opaque,
+    // depth-tested with depth writes and not decal, with no viewport, scissor or framebuffer change
+    // between; the order of such draws only matters where their depths tie. Per run: its draws, the
+    // draws whose texture set appeared earlier in the run, the draws whose texture set and program
+    // both did (they could join an earlier draw), and texture-set changes between consecutive draws
+    // as issued and as they would be sorted by texture set (distinct sets less one).
+    BENCH_GRP_RUNS,
+    BENCH_GRP_DRAWS,
+    BENCH_GRP_TEX_DUP,
+    BENCH_GRP_KEY_DUP,
+    BENCH_GRP_TEX_CHG,
+    BENCH_GRP_TEX_CHG_SORTED,
     BENCH_COUNTER_COUNT
 };
 extern "C" uint32_t gBenchCounters[BENCH_COUNTER_COUNT];
@@ -211,6 +223,9 @@ extern "C" int gBenchOpTime;
 // of an A/B are captured at the same frame rather than at the same wall-clock time (§8.32).
 extern "C" char gBenchDumpPath[512];
 extern "C" int gBenchDumpFb;
+// Bumped by the backend at every framebuffer switch, clear, copy or resolve and at frame start: a
+// barrier the §8.40 grouping count must not reorder across.
+extern "C" uint32_t gBenchFbEpoch;
 // Draws by the set of state changes that split each from the previous batch (§8.37), cumulative,
 // indexed by a set of these bits. TEX_SAME is a texture reload that bound the texture already bound
 // (NEXT.md item H); OTHER is a flush from anywhere else (framebuffer commands, end of frame).

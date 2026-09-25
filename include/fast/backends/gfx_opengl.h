@@ -168,6 +168,9 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
     // texture to use when that is the same one.
     GLuint mBenchPrevTex0 = 0;
     GLuint mBenchDummyTex = 0;
+    // Mode 11 (§8.40): the program of the latest draw, and the one drawn with before it changed.
+    GLuint mBenchLastProg = 0;
+    GLuint mBenchOtherProg = 0;
 #endif
     // What the context's vertex attribute arrays are known to hold, for mode >= 1. GLES 2 has no
     // VAOs, so this is global context state; anything else that touches it must call

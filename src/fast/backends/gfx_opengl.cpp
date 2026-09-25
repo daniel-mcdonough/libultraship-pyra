@@ -1359,8 +1359,41 @@ void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size
         } else {
             glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
         }
+    } else if (mBenchSkipDraw == 9 || mBenchSkipDraw == 10) {
+        // §8.40: what re-specifying an attribute pointer adds to the repeat. 9 re-issues every
+        // pointer of the current program with the values it already holds; 10 only the first. The
+        // shadow stays true, so nothing after the repeat changes.
+        ShaderProgram* prg = mCurrentShaderProgram;
+        const uint16_t stride = (uint16_t)(prg->numFloats * sizeof(float));
+        const uintptr_t base = mBoundArrayBuffer == 0 ? (uintptr_t)mClientVertexBase : 0;
+        size_t pos = 0;
+        for (int i = 0; i < prg->numAttribs; i++) {
+            const GLint loc = prg->attribLocations[i];
+            if (loc >= 0) {
+                glVertexAttribPointer(loc, prg->attribSizes[i], GL_FLOAT, GL_FALSE, stride,
+                                      (void*)(base + pos * sizeof(float)));
+                if (mBenchSkipDraw == 10) {
+                    break;
+                }
+            }
+            pos += prg->attribSizes[i];
+        }
+        glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
+    } else if (mBenchSkipDraw == 11) {
+        // §8.40: what a program switch adds to the repeat: glUseProgram of the last other program
+        // drawn with, and back. Attribute arrays and uniforms are per program or untouched.
+        const GLuint cur = mCurrentShaderProgram->openglProgramId;
+        if (mBenchOtherProg != 0) {
+            glUseProgram(mBenchOtherProg);
+            glUseProgram(cur);
+        }
+        glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
     }
     mBenchPrevTex0 = mLastBoundTextures[0];
+    if (mCurrentShaderProgram->openglProgramId != mBenchLastProg) {
+        mBenchOtherProg = mBenchLastProg;
+        mBenchLastProg = mCurrentShaderProgram->openglProgramId;
+    }
 #endif
 }
 
@@ -1429,6 +1462,9 @@ void GfxRenderingAPIOGL::OnResize() {
 }
 
 void GfxRenderingAPIOGL::StartFrame() {
+#ifdef SOH_BENCHMARK
+    gBenchFbEpoch++;
+#endif
     mFrameCount++;
 #ifdef USE_OPENGLES2
     // Client-side vertex arrays (mode 3) are legal in GLES2 but not in a desktop core profile.
@@ -1453,7 +1489,8 @@ void GfxRenderingAPIOGL::StartFrame() {
     // 3 and 4 (§8.37) draw each batch twice: all of it, or its first triangle. 5 and 6 (§8.38) repeat
     // it with a texture bind away and back before, or with another texture bound.
     // 7 and 8 (§8.39) repeat it after re-uploading the texture-size uniform unchanged, or with a
-    // different value.
+    // different value. 9 and 10 (§8.40) after re-issuing the program's attribute pointers unchanged,
+    // all or the first; 11 after a switch to another program and back.
     mBenchSkipDraw = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.ProbeSkipDraw", 0);
 #endif
 }
@@ -1617,6 +1654,9 @@ void GfxRenderingAPIOGL::UpdateFramebufferParameters(int fb_id, uint32_t width, 
 }
 
 void GfxRenderingAPIOGL::StartDrawToFramebuffer(int fb_id, float noise_scale) {
+#ifdef SOH_BENCHMARK
+    gBenchFbEpoch++;
+#endif
     BENCH_COUNT(BENCH_FB_BINDS, 1);
     FramebufferOGL& fb = mFrameBuffers[fb_id];
 
@@ -1628,6 +1668,9 @@ void GfxRenderingAPIOGL::StartDrawToFramebuffer(int fb_id, float noise_scale) {
 }
 
 void GfxRenderingAPIOGL::ClearFramebuffer(bool color, bool depth) {
+#ifdef SOH_BENCHMARK
+    gBenchFbEpoch++;
+#endif
     BENCH_COUNT(BENCH_CLEARS, 1);
     if (mLastScissorEnabled != 0) {
         mLastScissorEnabled = 0;
@@ -1748,6 +1791,9 @@ void GfxRenderingAPIOGL::BlitFramebufferAsQuad(GLuint dstFbo, GLuint srcTex, flo
 #endif
 
 void GfxRenderingAPIOGL::ResolveMSAAColorBuffer(int fb_id_target, int fb_id_source) {
+#ifdef SOH_BENCHMARK
+    gBenchFbEpoch++;
+#endif
     FramebufferOGL& fb_dst = mFrameBuffers[fb_id_target];
     FramebufferOGL& fb_src = mFrameBuffers[fb_id_source];
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fb_dst.fbo);
@@ -1780,6 +1826,9 @@ void* GfxRenderingAPIOGL::GetFramebufferTextureId(int fb_id) {
 }
 
 void GfxRenderingAPIOGL::SelectTextureFb(int fb_id) {
+#ifdef SOH_BENCHMARK
+    gBenchFbEpoch++;
+#endif
     // glDisable(GL_DEPTH_TEST);
     int tile = 0;
     SelectTexture(tile, mFrameBuffers[fb_id].clrbuf);
@@ -1787,6 +1836,9 @@ void GfxRenderingAPIOGL::SelectTextureFb(int fb_id) {
 
 void GfxRenderingAPIOGL::CopyFramebuffer(int fb_dst_id, int fb_src_id, int srcX0, int srcY0, int srcX1, int srcY1,
                                          int dstX0, int dstY0, int dstX1, int dstY1) {
+#ifdef SOH_BENCHMARK
+    gBenchFbEpoch++;
+#endif
     BENCH_COUNT(BENCH_FB_COPIES, 1);
     if (fb_dst_id >= (int)mFrameBuffers.size() || fb_src_id >= (int)mFrameBuffers.size()) {
         return;
