@@ -71,7 +71,7 @@ CVar* ConsoleVariable::Find(const char* name) {
         memo.byName.emplace(name, variable);
         return variable;
     }
-    if (mLeanCVar == 3) {
+    if (mLeanCVar == 3 || mLeanCVar == 4) {
         // Verification: the original keyed find against the transparent one, logged by name.
         static int logged = 0;
         auto original = mVariables.find(std::string(name));
@@ -90,7 +90,10 @@ CVar* ConsoleVariable::Find(const char* name) {
 
 std::shared_ptr<CVar> ConsoleVariable::Get(const char* name) {
     BENCH_CVAR_SCOPE("CV::Get");
-    if (mLeanCVar != 0) {
+    // Mode 4 (benchmark builds) is mode 3 with Get() left on the original keyed find: a bisect of
+    // why modes 1 and 3 change the frozen Market's picture (§8.31). Mode 4 changes it too, so the
+    // cause is neither lookup. Unexplained; LeanCVar stays 0.
+    if (mLeanCVar != 0 && mLeanCVar != 4) {
         auto it = mVariables.find(std::string_view(name));
         return it != mVariables.end() ? it->second : nullptr;
     }
