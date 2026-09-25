@@ -1361,8 +1361,9 @@ void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size
         }
     } else if (mBenchSkipDraw == 9 || mBenchSkipDraw == 10) {
         // §8.40: what re-specifying an attribute pointer adds to the repeat. 9 re-issues every
-        // pointer of the current program with the values it already holds; 10 only the first. The
-        // shadow stays true, so nothing after the repeat changes.
+        // pointer of the current program with the values it already holds, which a driver could
+        // recognise and skip; 10 first points each one elsewhere (stride + 4) and then back, as
+        // mode 5 does for a bind. The shadow stays true, so nothing after the repeat changes.
         ShaderProgram* prg = mCurrentShaderProgram;
         const uint16_t stride = (uint16_t)(prg->numFloats * sizeof(float));
         const uintptr_t base = mBoundArrayBuffer == 0 ? (uintptr_t)mClientVertexBase : 0;
@@ -1370,11 +1371,12 @@ void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size
         for (int i = 0; i < prg->numAttribs; i++) {
             const GLint loc = prg->attribLocations[i];
             if (loc >= 0) {
+                if (mBenchSkipDraw == 10) {
+                    glVertexAttribPointer(loc, prg->attribSizes[i], GL_FLOAT, GL_FALSE, stride + 4,
+                                          (void*)(base + pos * sizeof(float)));
+                }
                 glVertexAttribPointer(loc, prg->attribSizes[i], GL_FLOAT, GL_FALSE, stride,
                                       (void*)(base + pos * sizeof(float)));
-                if (mBenchSkipDraw == 10) {
-                    break;
-                }
             }
             pos += prg->attribSizes[i];
         }
@@ -1490,7 +1492,7 @@ void GfxRenderingAPIOGL::StartFrame() {
     // it with a texture bind away and back before, or with another texture bound.
     // 7 and 8 (§8.39) repeat it after re-uploading the texture-size uniform unchanged, or with a
     // different value. 9 and 10 (§8.40) after re-issuing the program's attribute pointers unchanged,
-    // all or the first; 11 after a switch to another program and back.
+    // or pointed elsewhere and back; 11 after a switch to another program and back.
     mBenchSkipDraw = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.ProbeSkipDraw", 0);
 #endif
 }
