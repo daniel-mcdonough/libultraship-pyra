@@ -71,6 +71,18 @@ CVar* ConsoleVariable::Find(const char* name) {
         memo.byName.emplace(name, variable);
         return variable;
     }
+    if (mLeanCVar == 3) {
+        // Verification: the original keyed find against the transparent one, logged by name.
+        static int logged = 0;
+        auto original = mVariables.find(std::string(name));
+        auto lean = mVariables.find(std::string_view(name));
+        if (original != lean && logged < 20) {
+            logged++;
+            SPDLOG_WARN("LeanCVar=3: '{}' original {} lean {}", name, original != mVariables.end(),
+                        lean != mVariables.end());
+        }
+        return original != mVariables.end() ? original->second.get() : nullptr;
+    }
 #endif
     auto it = mVariables.find(std::string_view(name));
     return it != mVariables.end() ? it->second.get() : nullptr;
