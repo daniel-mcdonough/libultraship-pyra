@@ -1308,7 +1308,26 @@ void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size
         glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
     } else if (mBenchSkipDraw == 4) {
         glDrawArrays(GL_TRIANGLES, 0, 3);
+    } else if (mBenchSkipDraw == 5 || mBenchSkipDraw == 6) {
+        // §8.38: what a texture bind adds to the repeat. The other texture is the one unit 0 held at
+        // the previous draw - a real scene texture - or a 1x1 one. 5 binds it and the original back
+        // before the repeat (a bind that changes nothing); 6 draws the repeat with it bound, then
+        // restores (a real texture change, nothing else different). Either way unit 0 and the
+        // backend's shadow end as they were, with unit 0 active.
+        const GLuint cur = mLastBoundTextures[0];
+        const GLuint other = (mBenchPrevTex0 != 0 && mBenchPrevTex0 != cur) ? mBenchPrevTex0 : mBenchDummyTex;
+        glActiveTexture(GL_TEXTURE0);
+        mLastActiveTexture = 0;
+        glBindTexture(GL_TEXTURE_2D, other);
+        if (mBenchSkipDraw == 5) {
+            glBindTexture(GL_TEXTURE_2D, cur);
+        }
+        glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
+        if (mBenchSkipDraw == 6) {
+            glBindTexture(GL_TEXTURE_2D, cur);
+        }
     }
+    mBenchPrevTex0 = mLastBoundTextures[0];
 #endif
 }
 
@@ -1317,6 +1336,17 @@ void GfxRenderingAPIOGL::Init() {
     glewInit();
 #endif
 
+#ifdef SOH_BENCHMARK
+    {
+        const uint8_t white[4] = { 255, 255, 255, 255 };
+        glGenTextures(1, &mBenchDummyTex);
+        glBindTexture(GL_TEXTURE_2D, mBenchDummyTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+#endif
     glGenBuffers(1, &mOpenglVbo);
     glBindBuffer(GL_ARRAY_BUFFER, mOpenglVbo);
     glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &mMaxVertexAttribs);
@@ -1387,7 +1417,8 @@ void GfxRenderingAPIOGL::StartFrame() {
     // gSettings.ProbeSkipDraw (§8.36), benchmark builds only: how much of the render thread is the
     // driver taking draws. 1 skips glDrawArrays in DrawTriangles; 2 skips DrawTriangles' GL work
     // entirely. The interpreter still does all of its own. Wrong picture by design.
-    // 3 and 4 (§8.37) draw each batch twice: all of it, or its first triangle.
+    // 3 and 4 (§8.37) draw each batch twice: all of it, or its first triangle. 5 and 6 (§8.38) repeat
+    // it with a texture bind away and back before, or with another texture bound.
     mBenchSkipDraw = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.ProbeSkipDraw", 0);
 #endif
 }

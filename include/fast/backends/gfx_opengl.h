@@ -164,6 +164,10 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
 #ifdef SOH_BENCHMARK
     // gSettings.ProbeSkipDraw, read each frame (report 8 §8.36).
     int mBenchSkipDraw = 0;
+    // Modes 5 and 6 (§8.38): the texture unit 0 held at the previous draw, and a complete 1x1
+    // texture to use when that is the same one.
+    GLuint mBenchPrevTex0 = 0;
+    GLuint mBenchDummyTex = 0;
 #endif
     // What the context's vertex attribute arrays are known to hold, for mode >= 1. GLES 2 has no
     // VAOs, so this is global context state; anything else that touches it must call
