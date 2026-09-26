@@ -215,12 +215,32 @@ bool Fast3dWindow::DrawAndRunGraphicsCommands(Gfx* commands, const std::unordere
     wnd->GetMouseStateManager()->StartFrame();
     // Setup of the backend frames and draw initial Window and GUI menus
     gui->StartDraw();
+#ifdef SOH_BENCHMARK
+    if (gBenchSplitHook != nullptr) {
+        gBenchSplitHook(0);
+    }
+#endif
     // Setup game framebuffers to match available window space
     mInterpreter->StartFrame();
+#ifdef SOH_BENCHMARK
+    if (gBenchSplitHook != nullptr) {
+        gBenchSplitHook(1);
+    }
+#endif
     // Execute the games gfx commands
     mInterpreter->Run(commands, mtxReplacements);
+#ifdef SOH_BENCHMARK
+    if (gBenchSplitHook != nullptr) {
+        gBenchSplitHook(2);
+    }
+#endif
     // Renders the game frame buffer to the final window and finishes the GUI
     gui->EndDraw();
+#ifdef SOH_BENCHMARK
+    if (gBenchSplitHook != nullptr) {
+        gBenchSplitHook(3);
+    }
+#endif
     // Finalize swap buffers
     mInterpreter->EndFrame();
 
