@@ -58,6 +58,13 @@ class ConsoleVariable {
     void Save();
     void Load();
 
+    // For callers that read the same variables every frame (§8.48). A CVar's value changes in place
+    // behind the same pointer; the pointer is only invalidated by adding, removing or reloading an
+    // entry, and each of those changes the generation. So a pointer from FindVariable stays valid,
+    // and a null answer stays true, until GetGeneration() returns something else.
+    CVar* FindVariable(const char* name);
+    static uint32_t GetGeneration();
+
   protected:
     void LoadFromPath(std::string path,
                       nlohmann::detail::iteration_proxy<nlohmann::detail::iter_impl<nlohmann::json>> items);

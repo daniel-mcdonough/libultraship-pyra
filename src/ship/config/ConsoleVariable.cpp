@@ -88,6 +88,15 @@ CVar* ConsoleVariable::Find(const char* name) {
     return it != mVariables.end() ? it->second.get() : nullptr;
 }
 
+CVar* ConsoleVariable::FindVariable(const char* name) {
+    auto it = mVariables.find(std::string_view(name));
+    return it != mVariables.end() ? it->second.get() : nullptr;
+}
+
+uint32_t ConsoleVariable::GetGeneration() {
+    return gCVarGeneration.load(std::memory_order_relaxed);
+}
+
 // Which getters take the lean path. Modes 5-9 (benchmark builds) bisect why a non-zero mode changes
 // the device's picture (§8.32): 5 none of them, 6-9 one family each.
 bool ConsoleVariable::LeanGetter(LeanGetterKind kind) const {

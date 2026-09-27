@@ -4942,6 +4942,7 @@ uint32_t gBenchCounters[BENCH_COUNTER_COUNT] = {};
 uint64_t gBenchSwapMicros = 0;
 uint64_t gBenchEofCpuMicros = 0;
 void (*gBenchSplitHook)(int stage) = nullptr;
+int gBenchSkipFlat = 0;
 int gBenchFinish = 0;
 uint64_t gBenchFinishMicros = 0;
 uint64_t gBenchOpcodes[256] = {};

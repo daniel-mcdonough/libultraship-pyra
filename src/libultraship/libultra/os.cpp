@@ -38,8 +38,18 @@ int32_t osContStartReadData(OSMesgQueue* mesg) {
     return 0;
 }
 
+#ifdef SOH_BENCHMARK
+extern "C" int gBenchSkipFlat;
+#endif
+
 void osContGetReadData(OSContPad* pad) {
     memset(pad, 0, sizeof(OSContPad) * __osMaxControllers);
+#ifdef SOH_BENCHMARK
+    // gSettings.ProbeSkipFlat bit 1 (§8.48): no controller read, the pads stay zeroed.
+    if (gBenchSkipFlat & 1) {
+        return;
+    }
+#endif
 
     Ship::Context::GetInstance()->GetControlDeck()->WriteToPad(pad);
 }

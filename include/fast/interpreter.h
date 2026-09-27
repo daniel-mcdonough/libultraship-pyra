@@ -217,6 +217,12 @@ extern "C" uint64_t gBenchEofCpuMicros;
 // stage boundaries inside one DrawAndRunGraphicsCommands: 0 after Gui::StartDraw, 1 after
 // Interpreter::StartFrame, 2 after Interpreter::Run, 3 after Gui::EndDraw.
 extern "C" void (*gBenchSplitHook)(int stage);
+// gSettings.ProbeSkipFlat (report 8 §8.48), read once per tick by the benchmark: one bit per per-frame
+// block to skip, to size the input, post-draw and ImGui blocks. Probe only; the picture may be wrong.
+// 1 WriteToPad, 2 rumble/LED, 4 mouse (soh), 8 audio update (soh), 16 OnGameFrameUpdate hooks (soh),
+// 32 DrawMenu's menus and windows, 64 the SDL backend's NewFrame, 128 DrawFloatingWindows,
+// 256 HandleMouseCapture and the mouse state manager, 512 the game overlay.
+extern "C" int gBenchSkipFlat;
 // When set, the renderer calls glFinish before the swap and times it, splitting "the GPU had not
 // finished the frame" from "presenting it took the time". Off by default: glFinish serialises CPU
 // and GPU, so it changes the thing being measured.
