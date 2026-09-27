@@ -263,6 +263,17 @@ extern "C" const char* const gBenchBatchCauseNames[BENCH_BRK_BITS];
 
 namespace Fast {
 
+// gSettings.LeanPresent (report 08 §8.46), the present pass: bit 1 draws the game framebuffer's quad
+// without blending, bit 2 leaves the window's colour uncleared under it, bit 4 samples it with
+// GL_NEAREST. Bit 1 is exact (the framebuffer is RGB, so it samples alpha 1) and the GLES2 default:
+// -0.32 ms of GPU per frame at the Market. Bit 2 costs +1.6 ms (the tiler reloads every tile) and
+// bit 4 nothing measurable; both stay probes.
+#ifdef USE_OPENGLES2
+constexpr int kLeanPresentDefault = 1;
+#else
+constexpr int kLeanPresentDefault = 0;
+#endif
+
 class GfxRenderingAPI;
 class GfxWindowBackend;
 

@@ -665,10 +665,10 @@ void Gui::CalculateGameViewport() {
 }
 
 #ifdef ENABLE_OPENGL
-// gSettings.LeanPresent (NEXT.md item I), the present pass. Bit 1: the game's framebuffer is opaque
-// and covers its rectangle, so its quad needs no blending; ImGui's backend enables it for every draw.
-// Bit 4: sample it with GL_NEAREST (the 2x scale becomes pixel doubling). The reset callback after
-// the image puts ImGui's own state back for whatever it draws next.
+// gSettings.LeanPresent (Fast::kLeanPresentDefault), the present pass. Bit 1: the game's framebuffer
+// is opaque and covers its rectangle, so its quad needs no blending; ImGui's backend enables it for
+// every draw. Bit 4: sample it with GL_NEAREST (the 2x scale becomes pixel doubling). The reset
+// callback after the image puts ImGui's own state back for whatever it draws next.
 static int sPresentMode = 0;
 static void PresentStateCallback(const ImDrawList*, const ImDrawCmd* cmd) {
     // The filter is the texture's own state, so it is set either way: the A/B harness flips the CVar
@@ -744,7 +744,8 @@ void Gui::DrawGame() {
         const bool gl =
             Context::GetInstance()->GetWindow()->GetWindowBackend() == WindowBackend::FAST3D_SDL_OPENGL;
         if (gl) {
-            sPresentMode = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanPresent", 0);
+            sPresentMode = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(
+                "gSettings.LeanPresent", Fast::kLeanPresentDefault);
             ImGui::GetWindowDrawList()->AddCallback(PresentStateCallback, reinterpret_cast<void*>(fb));
         }
 #endif
