@@ -376,7 +376,10 @@ void ConsoleVariable::ClearVariable(const char* name) {
     }
     mVariables.erase(name);
     conf->Erase(StringHelper::Sprintf("CVars.%s", name));
-    Changed(name, true);
+    // Structural only if an entry went: clearing an absent variable invalidates no pointer. The game
+    // clears gDeveloperTools.FrameAdvanceTick on every update while frame advance is off, which
+    // otherwise moved the generation every tick and defeated every cache keyed on it (§8.48).
+    Changed(name, var != nullptr);
 }
 
 void ConsoleVariable::ClearBlock(const char* name) {
