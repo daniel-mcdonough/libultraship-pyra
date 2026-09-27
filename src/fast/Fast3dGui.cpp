@@ -9,6 +9,9 @@
 #include "fast/resource/type/Texture.h"
 #include "ship/window/gui/resource/GuiTextureFactory.h"
 #include "ship/resource/File.h"
+#ifdef SOH_BENCHMARK
+extern "C" int gBenchSkipFlat;
+#endif
 
 #ifdef __APPLE__
 #include <SDL_hints.h>
@@ -277,6 +280,11 @@ void Fast3dGui::ImGuiRenderDrawData(ImDrawData* data) {
 }
 
 void Fast3dGui::DrawFloatingWindows() {
+#ifdef SOH_BENCHMARK
+    if (gBenchSkipFlat & 128) {
+        return;
+    }
+#endif
     if (!(ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable)) {
         return;
     }
@@ -393,7 +401,10 @@ void Fast3dGui::DrawGame() {
     ImGui::PopStyleVar(3);
     ImGui::PopStyleColor();
 
-    GetGameOverlay()->Draw();
+#ifdef SOH_BENCHMARK
+    if (!(gBenchSkipFlat & 512))
+#endif
+        GetGameOverlay()->Draw();
 
     ImVec2 mainPos = ImGui::GetWindowPos();
     ImVec2 size = ImGui::GetContentRegionAvail();

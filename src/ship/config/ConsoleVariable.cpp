@@ -76,6 +76,15 @@ CVar* ConsoleVariable::Find(const char* name) {
     return it != mVariables.end() ? it->second.get() : nullptr;
 }
 
+CVar* ConsoleVariable::FindVariable(const char* name) {
+    auto it = mVariables.find(std::string_view(name));
+    return it != mVariables.end() ? it->second.get() : nullptr;
+}
+
+uint32_t ConsoleVariable::GetGeneration() {
+    return gCVarGeneration.load(std::memory_order_relaxed);
+}
+
 std::shared_ptr<CVar> ConsoleVariable::Get(const char* name) {
     BENCH_CVAR_SCOPE("CV::Get");
     auto it = mVariables.find(name);

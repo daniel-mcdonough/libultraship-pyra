@@ -15,6 +15,9 @@
 #include "ship/window/gui/Fonts.h"
 #include "ship/window/gui/resource/GuiTextureFactory.h"
 #include "ship/window/gui/resource/GuiTexture.h"
+#ifdef SOH_BENCHMARK
+extern "C" int gBenchSkipFlat;
+#endif
 
 namespace Ship {
 #define TOGGLE_BTN ImGuiKey_F1
@@ -252,6 +255,12 @@ void Gui::DrawMenu() {
             ->Dispatch("reset");
     }
 
+#ifdef SOH_BENCHMARK
+    if (gBenchSkipFlat & 32) {
+        ImGui::End();
+        return;
+    }
+#endif
     if (GetMenuBar()) {
         GetMenuBar()->Update();
         GetMenuBar()->Draw();
@@ -285,6 +294,19 @@ void Gui::HandleMouseCapture() {
 }
 
 void Gui::StartFrame() {
+#ifdef SOH_BENCHMARK
+    // gSettings.ProbeSkipFlat bits 256 and 64 (§8.48). The SDL backend's NewFrame sets the display
+    // size and delta time; skipped, the previous frame's stay.
+    if (!(gBenchSkipFlat & 256)) {
+        HandleMouseCapture();
+    }
+    ImGuiBackendNewFrame();
+    if (!(gBenchSkipFlat & 64)) {
+        ImGuiWMNewFrame();
+    }
+    ImGui::NewFrame();
+    return;
+#endif
     HandleMouseCapture();
     ImGuiBackendNewFrame();
     ImGuiWMNewFrame();
