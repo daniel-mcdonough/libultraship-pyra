@@ -1366,6 +1366,9 @@ static int sLeanTexLoad = 1;
 // path. Default 1: 33 of the Market's 261 draws, -158 us (-1.1%) of its window CPU at 1000 MHz,
 // pixel-identical, and clean in real play. Set 0 to A/B against the original.
 static int sLeanTexReuse = 1;
+// gSettings.LeanPresent (NEXT.md item I): the present pass. Bit 1 draws the game quad without
+// blending (Gui::DrawGame); bit 2 leaves the window's colour uncleared under it.
+static int sLeanPresent = 0;
 static const struct U8ToUnitTable {
     float v[256];
     U8ToUnitTable() {
@@ -4739,9 +4742,12 @@ bool Interpreter::ViewportMatchesRendererResolution() {
 }
 
 void Interpreter::StartFrame() {
+    // A swap EndFrame left for here (gSettings.LeanSwap) runs first, before any GL of this frame.
+    SwapPending();
     sLeanGeom = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanGeom", 1);
     sLeanTexLoad = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanTexLoad", 1);
     sLeanTexReuse = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanTexReuse", 1);
+    sLeanPresent = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanPresent", 0);
 #ifdef SOH_BENCHMARK
     sProbeSkipLight = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.ProbeSkipLight", 0);
 #endif
@@ -4905,7 +4911,7 @@ void Interpreter::Run(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtx_r
         // SetFrameBuffer), so nothing can observe the discarded contents.
         mRapi->DiscardDepthStencil();
         mRapi->StartDrawToFramebuffer(0, 1);
-        mRapi->ClearFramebuffer(true, true);
+        mRapi->ClearFramebuffer(!(sLeanPresent & 2), true);
         if (mMsaaLevel > 1) {
             if (!ViewportMatchesRendererResolution()) {
                 mRapi->ResolveMSAAColorBuffer(mGameFbMsaaResolved, mGameFb);
@@ -4954,16 +4960,39 @@ void Interpreter::EndFrame() {
 #ifdef SOH_BENCHMARK
     // The resolved copy when multisampled: a multisampled buffer cannot be read directly.
     gBenchDumpFb = !mRendersToFb ? 0 : mMsaaLevel > 1 ? mGameFbMsaaResolved : mGameFb;
-#endif
-#ifdef SOH_BENCHMARK
-    // The render thread's CPU time from here to the end of the swap (report 8 §8.36): the backend's
-    // end of frame (depth discard, glFlush) and the swap, i.e. the driver's per-frame kick, as work
-    // rather than as waiting. swap_us is the swap's wall time and mostly waiting.
     timespec eofStart{};
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &eofStart);
 #endif
     mRapi->EndFrame();
 #ifdef SOH_BENCHMARK
+    // eof_cpu_us (report 8 §8.36) is the backend's end of frame (depth discard, glFlush) plus the
+    // swap's CPU time, wherever the swap runs.
+    timespec eofEnd{};
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &eofEnd);
+    gBenchEofCpuMicros += (uint64_t)((eofEnd.tv_sec - eofStart.tv_sec) * 1000000000LL +
+                                     (eofEnd.tv_nsec - eofStart.tv_nsec)) /
+                          1000u;
+#endif
+    mSwapPending = true;
+    // gSettings.LeanSwap: on this driver the swap blocks until the frame's GPU work is done (report
+    // 08 §8.46), so the render thread waits out the whole GPU frame. Leaving the swap for the next
+    // StartFrame lets the CPU-only work in between (input, logic, building the next display list,
+    // ImGui's frame start) run while the GPU finishes. EndFrame's glFlush has already sent it all.
+    if (!Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanSwap", 0)) {
+        SwapPending();
+    }
+}
+
+void Interpreter::SwapPending() {
+    if (!mSwapPending) {
+        return;
+    }
+    mSwapPending = false;
+#ifdef SOH_BENCHMARK
+    // The swap's CPU time, the driver's per-frame kick, as work rather than as waiting; it goes into
+    // eof_cpu_us with EndFrame's. swap_us is the swap's wall time and mostly waiting.
+    timespec eofStart{};
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &eofStart);
     const auto swapStart = std::chrono::steady_clock::now();
 #endif
     mWapi->SwapBuffersBegin();

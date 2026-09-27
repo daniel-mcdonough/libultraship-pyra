@@ -504,6 +504,8 @@ class Interpreter {
     void RunGuiOnly();
     void Run(Gfx* commands, const std::unordered_map<Mtx*, MtxF>& mtx_replacements);
     void EndFrame();
+    // gSettings.LeanSwap: EndFrame flushes and leaves the swap for the next StartFrame.
+    void SwapPending();
     void HandleWindowEvents();
     bool IsFrameReady();
     bool ViewportMatchesRendererResolution();
@@ -645,6 +647,7 @@ class Interpreter {
 
     bool mFbActive{};
     bool mRendersToFb{}; // game_renders_to_framebuffer;
+    bool mSwapPending{};
     std::map<int, FBInfo>::iterator mActiveFrameBuffer;
     std::map<int, FBInfo> mFrameBuffers;
 
