@@ -26,6 +26,7 @@
 
 #ifdef ENABLE_OPENGL
 #include <imgui_impl_opengl3.h>
+#include "fast/backends/gfx_opengl.h"
 #include <imgui_impl_sdl2.h>
 #endif
 
@@ -361,6 +362,25 @@ void Fast3dGui::CalculateGameViewport() {
     ImGui::End();
 }
 
+#ifdef ENABLE_OPENGL
+// gSettings.LeanPresent (NEXT.md item I), the present pass. Bit 1: the game's framebuffer is opaque
+// and covers its rectangle, so its quad needs no blending; ImGui's backend enables it for every draw.
+// Bit 4: sample it with GL_NEAREST (the 2x scale becomes pixel doubling). The reset callback after
+// the image puts ImGui's own state back for whatever it draws next.
+static int sPresentMode = 0;
+static void PresentStateCallback(const ImDrawList*, const ImDrawCmd* cmd) {
+    // The filter is the texture's own state, so it is set either way: the A/B harness flips the CVar
+    // between segments. ImGui's backend binds its textures itself, inside this same pass.
+    const GLint filter = (sPresentMode & 4) ? GL_NEAREST : GL_LINEAR;
+    glBindTexture(GL_TEXTURE_2D, (GLuint) reinterpret_cast<uintptr_t>(cmd->UserCallbackData));
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+    if (sPresentMode & 1) {
+        glDisable(GL_BLEND);
+    }
+}
+#endif
+
 void Fast3dGui::DrawGame() {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
@@ -419,7 +439,20 @@ void Fast3dGui::DrawGame() {
     uintptr_t fb = Ship::Context::GetRawInstance()->GetWindow()->GetGfxFrameBuffer();
     if (fb) {
         ImGui::SetCursorPos(pos);
+#ifdef ENABLE_OPENGL
+        const bool gl = mImpl.Backend == WindowBackend::FAST3D_SDL_OPENGL;
+        if (gl) {
+            sPresentMode =
+                Ship::Context::GetRawInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanPresent", 0);
+            ImGui::GetWindowDrawList()->AddCallback(PresentStateCallback, reinterpret_cast<void*>(fb));
+        }
+#endif
         ImGui::Image(reinterpret_cast<ImTextureID>(fb), size);
+#ifdef ENABLE_OPENGL
+        if (gl) {
+            ImGui::GetWindowDrawList()->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
+        }
+#endif
     }
 
     ImGui::End();
