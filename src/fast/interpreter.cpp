@@ -1720,9 +1720,9 @@ static int sLeanTexLoad = 1;
 // path. Default 1: 33 of the Market's 261 draws, -158 us (-1.1%) of its window CPU at 1000 MHz,
 // pixel-identical, and clean in real play. Set 0 to A/B against the original.
 static int sLeanTexReuse = 1;
-// gSettings.LeanPresent (NEXT.md item I): the present pass. Bit 1 draws the game quad without
-// blending (Gui::DrawGame); bit 2 leaves the window's colour uncleared under it.
-static int sLeanPresent = 0;
+// gSettings.LeanPresent (kLeanPresentDefault): bit 2 leaves the window's colour uncleared under the
+// game quad. Bits 1 and 4 are read in Fast3dGui::DrawGame.
+static int sLeanPresent = kLeanPresentDefault;
 static const struct U8ToUnitTable {
     float v[256];
     U8ToUnitTable() {
@@ -5465,7 +5465,8 @@ void Interpreter::StartFrame() {
     sLeanGeom = Ship::Context::GetRawInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanGeom", 1);
     sLeanTexLoad = Ship::Context::GetRawInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanTexLoad", 1);
     sLeanTexReuse = Ship::Context::GetRawInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanTexReuse", 1);
-    sLeanPresent = Ship::Context::GetRawInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanPresent", 0);
+    sLeanPresent =
+        Ship::Context::GetRawInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanPresent", kLeanPresentDefault);
 #ifdef SOH_BENCHMARK
     sProbeSkipLight = Ship::Context::GetRawInstance()->GetConsoleVariables()->GetInteger("gSettings.ProbeSkipLight", 0);
 #endif
