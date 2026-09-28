@@ -1287,9 +1287,9 @@ void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size
     if (mBenchSkipDraw == 2) {
         return;
     }
-    if (gBenchDumpPath[0] != '\0') {
+    if (gBenchDumpPathGL[0] != '\0') {
         if (sBenchVboTrace == nullptr) {
-            const std::string path = std::string(gBenchDumpPath) + ".vbo";
+            const std::string path = std::string(gBenchDumpPathGL) + ".vbo";
             sBenchVboTrace = fopen(path.c_str(), "wb");
         }
         if (sBenchVboTrace != nullptr) {
@@ -1325,7 +1325,7 @@ void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size
             const int n64modeFactor = 120;
             const int noVanishFactor = 100;
             GLfloat SSDB = -2;
-            switch (Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(CVAR_Z_FIGHTING_MODE, 0)) {
+            switch (mZFightingMode) {
                 // scaled z-fighting (N64 mode like)
                 case 1:
                     if (mFrameBuffers.size() >
@@ -1507,7 +1507,7 @@ void GfxRenderingAPIOGL::UpdateOwedDepthState() {
             const int n64modeFactor = 120;
             const int noVanishFactor = 100;
             GLfloat SSDB = -2;
-            switch (Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(CVAR_Z_FIGHTING_MODE, 0)) {
+            switch (mZFightingMode) {
                 case 1:
                     if (mFrameBuffers.size() > mCurrentFrameBuffer) {
                         SSDB = -1.0f * (GLfloat)mFrameBuffers[mCurrentFrameBuffer].height / n64modeFactor;
@@ -1845,23 +1845,24 @@ bool GfxRenderingAPIOGL::WillBindLazily() {
     return lean >= 3 && group != 0;
 }
 
-void GfxRenderingAPIOGL::StartFrame() {
-    FlushGroups();
-#ifdef SOH_BENCHMARK
-    gBenchFbEpoch++;
-#endif
-    mFrameCount++;
-    int lean, group;
-    ReadLeanModes(lean, group);
-    // Re-establish the attribute shadow every frame rather than trust that nothing else in the
-    // context (ImGui draws between frames) left the arrays exactly as it found them; and on any
-    // change of mode, since mode 0 does not maintain the shadow.
-    if (lean >= 1 || lean != mLeanGLState) {
-        mLeanGLState = lean;
-        ForgetVertexAttribs(true);
-    }
-    mLeanGLState = lean;
-    SetLeanGroup(lean >= 3 && group != 0 ? 1 : 0);
+// What StartFrame reads from the CVar store, captured on the main thread (report 11): a GL thread
+// must not read the store.
+struct GLFrameSettings {
+    int32_t lean;
+    int32_t group;
+    int32_t zFighting;
+    int32_t benchSkipDraw;
+};
+
+size_t GfxRenderingAPIOGL::FrameSettingsSize() {
+    return sizeof(GLFrameSettings);
+}
+
+void GfxRenderingAPIOGL::CaptureFrameSettings(void* out) {
+    GLFrameSettings s{};
+    ReadLeanModes(s.lean, s.group);
+    // Read once a frame for the decal path's polygon offset, which read it per draw until report 11.
+    s.zFighting = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(CVAR_Z_FIGHTING_MODE, 0);
 #ifdef SOH_BENCHMARK
     // gSettings.ProbeSkipDraw (§8.36), benchmark builds only: how much of the render thread is the
     // driver taking draws. 1 skips glDrawArrays in DrawTriangles; 2 skips DrawTriangles' GL work
@@ -1871,7 +1872,38 @@ void GfxRenderingAPIOGL::StartFrame() {
     // 7 and 8 (§8.39) repeat it after re-uploading the texture-size uniform unchanged, or with a
     // different value. 9 and 10 (§8.40) after re-issuing the program's attribute pointers unchanged,
     // or pointed elsewhere and back; 11 after a switch to another program and back.
-    mBenchSkipDraw = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.ProbeSkipDraw", 0);
+    s.benchSkipDraw = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.ProbeSkipDraw", 0);
+#endif
+    memcpy(out, &s, sizeof(s));
+}
+
+void GfxRenderingAPIOGL::StartFrame() {
+    GLFrameSettings s;
+    CaptureFrameSettings(&s);
+    StartFrameWith(&s);
+}
+
+void GfxRenderingAPIOGL::StartFrameWith(const void* settings) {
+    GLFrameSettings s;
+    memcpy(&s, settings, sizeof(s));
+    FlushGroups();
+#ifdef SOH_BENCHMARK
+    gBenchFbEpoch++;
+#endif
+    mFrameCount++;
+    const int lean = s.lean;
+    // Re-establish the attribute shadow every frame rather than trust that nothing else in the
+    // context (ImGui draws between frames) left the arrays exactly as it found them; and on any
+    // change of mode, since mode 0 does not maintain the shadow.
+    if (lean >= 1 || lean != mLeanGLState) {
+        mLeanGLState = lean;
+        ForgetVertexAttribs(true);
+    }
+    mLeanGLState = lean;
+    SetLeanGroup(lean >= 3 && s.group != 0 ? 1 : 0);
+    mZFightingMode = s.zFighting;
+#ifdef SOH_BENCHMARK
+    mBenchSkipDraw = s.benchSkipDraw;
 #endif
 }
 
@@ -1908,13 +1940,13 @@ void GfxRenderingAPIOGL::EndFrame() {
                                   std::chrono::steady_clock::now() - finishStart)
                                   .count();
     }
-    if (gBenchDumpPath[0] != '\0') {
-        DumpFramebuffer(gBenchDumpFb, gBenchDumpPath);
+    if (gBenchDumpPathGL[0] != '\0') {
+        DumpFramebuffer(gBenchDumpFb, gBenchDumpPathGL);
         if (sBenchVboTrace != nullptr) {
             fclose(sBenchVboTrace);
             sBenchVboTrace = nullptr;
         }
-        gBenchDumpPath[0] = '\0';
+        gBenchDumpPathGL[0] = '\0';
     }
 #endif
     glFlush();

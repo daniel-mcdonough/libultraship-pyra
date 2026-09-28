@@ -1,13 +1,22 @@
-// gSettings.RenderThread (report 11): the recording proxy on GfxRenderingAPI. Stage 1 replays on the
-// same thread; the design, the crossings and their reasons are in docs/pyra/11-two-core-render.md.
+// gSettings.RenderThread (report 11): the recording proxy on GfxRenderingAPI, replayed on the same
+// thread (mode 1) or on a GL thread that owns the context (mode 2). The design, the crossings and their
+// reasons are in docs/pyra/11-two-core-render.md.
 
 #include "fast/backends/gfx_threaded.h"
 
+#include <chrono>
 #include <cstring>
 #include <ctime>
+#include <pthread.h>
 
+#include <spdlog/spdlog.h>
+
+#include "fast/backends/gfx_window_manager_api.h"
 #include "ship/Context.h"
 #include "ship/config/ConsoleVariable.h"
+#ifdef SOH_BENCHMARK
+#include "fast/interpreter.h"
+#endif
 
 extern "C" uint64_t gBenchRThread[Fast::BENCH_RT_COUNT] = {};
 
@@ -41,8 +50,13 @@ enum class GfxRenderingAPIThreaded::Op : uint16_t {
     DeleteTexture,
     SetSrgbMode,
     RunInOrder,
+    FrameEnd,
+    SyncCall,
+    Acquire,
+    Release,
     CheckBound,
     CheckClip,
+    DumpPath,
 };
 
 namespace {
@@ -76,6 +90,11 @@ struct DrawArgs {
     uint32_t len, tris;
     // then len floats
 };
+struct StartArgs {
+    uint32_t settingsBytes;
+    uint32_t pad;
+    // then the backend's frame settings
+};
 struct FbParamArgs {
     int32_t fb;
     uint32_t width, height, msaa;
@@ -103,7 +122,10 @@ struct CallbackArgs {
     void (*fn)(void*);
     void* arg;
 };
-struct CheckBoundArgs {
+struct SyncCallArgs {
+    const std::function<void()>* fn;
+};
+struct CheckArgs {
     int32_t tile;
     uint32_t tex;
     bool answer;
@@ -119,6 +141,10 @@ uint64_t ThreadCpuNanos() {
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
+void Count(int k, uint64_t n) {
+    __atomic_fetch_add(&gBenchRThread[k], n, __ATOMIC_RELAXED);
+}
+
 int CVarInt(const char* name, int fallback) {
     return Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(name, fallback);
 }
@@ -127,58 +153,221 @@ int CVarInt(const char* name, int fallback) {
 // deleted, so holding some unused is harmless.
 constexpr size_t kTexturePoolRefill = 32;
 
+constexpr size_t kMaxTiles = 8;
+
 } // namespace
 
 GfxRenderingAPIThreaded::GfxRenderingAPIThreaded(GfxRenderingAPI* inner) : mInner(inner) {
-    mStream.resize(1 << 20);
 }
 
 GfxRenderingAPIThreaded::~GfxRenderingAPIThreaded() {
-    Drain();
+    Shutdown();
+    for (Block* b : mFree) {
+        delete b;
+    }
+    delete mCur;
 }
 
-uint8_t* GfxRenderingAPIThreaded::Reserve(size_t bytes) {
-    if (mStreamUsed + bytes > mStream.size()) {
-        mStream.resize(std::max(mStream.size() * 2, mStreamUsed + bytes));
+void GfxRenderingAPIThreaded::Shutdown() {
+    SetMode(0);
+    if (mThread.joinable()) {
+        {
+            std::lock_guard<std::mutex> lk(mMutex);
+            mStop = true;
+        }
+        mWake.notify_all();
+        mThread.join();
+        mGlThreadId = std::thread::id();
     }
-    uint8_t* p = mStream.data() + mStreamUsed;
-    mStreamUsed += bytes;
-    return p;
+}
+
+// --- The stream ----------------------------------------------------------------------------------
+
+GfxRenderingAPIThreaded::Block* GfxRenderingAPIThreaded::TakeBlock(size_t atLeast) {
+    {
+        std::lock_guard<std::mutex> lk(mMutex);
+        for (size_t i = 0; i < mFree.size(); i++) {
+            if (mFree[i]->cap >= atLeast) {
+                Block* b = mFree[i];
+                mFree[i] = mFree.back();
+                mFree.pop_back();
+                b->used = 0;
+                return b;
+            }
+        }
+    }
+    Block* b = new Block();
+    b->cap = std::max(kBlockBytes, atLeast);
+    b->data.reset(new uint8_t[b->cap]);
+    return b;
+}
+
+void GfxRenderingAPIThreaded::Recycle(Block* b) {
+    b->used = 0;
+    std::lock_guard<std::mutex> lk(mMutex);
+    mFree.push_back(b);
 }
 
 template <typename T> T* GfxRenderingAPIThreaded::Emit(Op op, size_t extra) {
     const size_t size = Align8(sizeof(Header)) + Align8(sizeof(T) + extra);
-    uint8_t* p = Reserve(size);
+    if (mCur == nullptr || mCur->used + size > mCur->cap) {
+        Publish();
+        mCur = TakeBlock(size);
+    }
+    uint8_t* p = mCur->data.get() + mCur->used;
+    mCur->used += size;
     Header* h = reinterpret_cast<Header*>(p);
     h->op = op;
     h->pad = 0;
     h->size = (uint32_t)size;
-    gBenchRThread[BENCH_RT_RECORDS]++;
-    gBenchRThread[BENCH_RT_BYTES] += size;
+    Count(BENCH_RT_RECORDS, 1);
+    Count(BENCH_RT_BYTES, size);
     return reinterpret_cast<T*>(p + Align8(sizeof(Header)));
 }
 
+void GfxRenderingAPIThreaded::Publish() {
+    if (mCur == nullptr || mCur->used == 0) {
+        return;
+    }
+    Block* b = mCur;
+    mCur = nullptr;
+    if (mMode == 2) {
+        {
+            std::lock_guard<std::mutex> lk(mMutex);
+            mQueue.push_back(b);
+            mBlocksQueued++;
+        }
+        mWake.notify_one();
+    } else {
+        mPending.push_back(b);
+    }
+}
+
+void GfxRenderingAPIThreaded::WaitWhile(const std::function<bool()>& busy) {
+    std::unique_lock<std::mutex> lk(mMutex);
+    if (!busy()) {
+        return;
+    }
+    const auto start = std::chrono::steady_clock::now();
+    mDone.wait(lk, [&] { return !busy(); });
+    Count(BENCH_RT_WAIT_NS,
+          (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start)
+              .count());
+}
+
 void GfxRenderingAPIThreaded::Drain() {
-    if (mStreamUsed == 0) {
+    Publish();
+    if (mMode == 2) {
+        WaitWhile([&] { return mBlocksDone != mBlocksQueued; });
+        return;
+    }
+    if (mPending.empty()) {
         return;
     }
     const uint64_t start = ThreadCpuNanos();
+    for (Block* b : mPending) {
+        ReplayBlock(b);
+        Recycle(b);
+    }
+    mPending.clear();
+    Count(BENCH_RT_REPLAY_NS, ThreadCpuNanos() - start);
+}
+
+void GfxRenderingAPIThreaded::ReplayBlock(Block* b) {
     size_t pos = 0;
-    while (pos < mStreamUsed) {
-        const Header* h = reinterpret_cast<const Header*>(mStream.data() + pos);
+    while (pos < b->used) {
+        const Header* h = reinterpret_cast<const Header*>(b->data.get() + pos);
         Replay(h);
         pos += h->size;
     }
-    mStreamUsed = 0;
-    gBenchRThread[BENCH_RT_REPLAY_NS] += ThreadCpuNanos() - start;
 }
 
-void GfxRenderingAPIThreaded::Sync() {
-    if (Recording()) {
-        gBenchRThread[BENCH_RT_SYNCS]++;
-        Drain();
+void GfxRenderingAPIThreaded::Call(const std::function<void()>& fn) {
+    if (mMode == 0) {
+        fn();
+        return;
+    }
+    Count(BENCH_RT_SYNCS, 1);
+    if (mMode == 2) {
+        Emit<SyncCallArgs>(Op::SyncCall)->fn = &fn;
+        Drain(); // the GL thread has run fn when it returns
+        return;
+    }
+    Drain();
+    fn();
+}
+
+// --- The GL thread -------------------------------------------------------------------------------
+
+void GfxRenderingAPIThreaded::GlThreadMain() {
+    pthread_setname_np(pthread_self(), "soh-gl");
+    std::unique_lock<std::mutex> lk(mMutex);
+    for (;;) {
+        mWake.wait(lk, [&] { return mStop || !mQueue.empty(); });
+        if (mQueue.empty()) {
+            break; // mStop
+        }
+        Block* b = mQueue.front();
+        mQueue.pop_front();
+        lk.unlock();
+        const uint64_t start = ThreadCpuNanos();
+        ReplayBlock(b);
+        Count(BENCH_RT_REPLAY_NS, ThreadCpuNanos() - start);
+        b->used = 0;
+        lk.lock();
+        mFree.push_back(b);
+        mBlocksDone++;
+        mDone.notify_all();
     }
 }
+
+// Mode changes happen at a frame start, with the previous frame's work done in the old mode.
+void GfxRenderingAPIThreaded::SetMode(int mode) {
+    if (mode == 2 && (mWapi == nullptr || mThreadFailed)) {
+        mode = 1;
+    }
+    if (mode == mMode) {
+        return;
+    }
+    Drain();
+    if (mMode == 2) {
+        // Leaving: the GL thread lets the context go, then this thread takes it.
+        Emit<OneInt>(Op::Release);
+        Drain();
+        if (!mWapi->MakeContextCurrent(true)) {
+            SPDLOG_ERROR("RenderThread: could not take the GL context back from the GL thread");
+        }
+    }
+    mMode = mode;
+    if (mode != 2) {
+        return;
+    }
+    if (!mWapi->MakeContextCurrent(false)) {
+        SPDLOG_ERROR("RenderThread: could not release the GL context; staying on this thread");
+        mThreadFailed = true;
+        mMode = 1;
+        return;
+    }
+    if (!mThread.joinable()) {
+        std::lock_guard<std::mutex> lk(mMutex);
+        mStop = false;
+        mThread = std::thread([this] { GlThreadMain(); });
+        mGlThreadId = mThread.get_id();
+    }
+    mAcquireOk = false;
+    Emit<OneInt>(Op::Acquire);
+    Drain();
+    if (!mAcquireOk) {
+        SPDLOG_ERROR("RenderThread: the GL thread could not make the context current; staying on this thread");
+        mThreadFailed = true;
+        mMode = 1;
+        mWapi->MakeContextCurrent(true);
+        return;
+    }
+    SPDLOG_INFO("RenderThread: GL context moved to the GL thread");
+}
+
+// --- Replay --------------------------------------------------------------------------------------
 
 void GfxRenderingAPIThreaded::Replay(const Header* h) {
     const uint8_t* a = reinterpret_cast<const uint8_t*>(h) + Align8(sizeof(Header));
@@ -236,7 +425,7 @@ void GfxRenderingAPIThreaded::Replay(const Header* h) {
             r->OnResize();
             break;
         case Op::StartFrame:
-            r->StartFrame();
+            r->StartFrameWith(a + sizeof(StartArgs));
             break;
         case Op::EndFrame:
             r->EndFrame();
@@ -302,29 +491,53 @@ void GfxRenderingAPIThreaded::Replay(const Header* h) {
             x->fn(x->arg);
             break;
         }
-        case Op::CheckClip: {
-            // Counted with the binding checks: a wrong answer here flips the picture.
-            gBenchRThread[BENCH_RT_CHECKS]++;
-            if (r->GetClipParameters().invertY != reinterpret_cast<const CheckBoundArgs*>(a)->answer) {
-                gBenchRThread[BENCH_RT_MISMATCH]++;
+        case Op::FrameEnd: {
+            const auto* x = reinterpret_cast<const CallbackArgs*>(a);
+            x->fn(x->arg);
+            {
+                std::lock_guard<std::mutex> lk(mMutex);
+                mFramesDone++;
+            }
+            mDone.notify_all();
+            break;
+        }
+        case Op::SyncCall:
+            (*reinterpret_cast<const SyncCallArgs*>(a)->fn)();
+            break;
+        case Op::Acquire:
+            mAcquireOk = mWapi->MakeContextCurrent(true);
+            break;
+        case Op::Release:
+            mWapi->MakeContextCurrent(false);
+            break;
+        case Op::CheckBound: {
+            const auto* x = reinterpret_cast<const CheckArgs*>(a);
+            Count(BENCH_RT_CHECKS, 1);
+            const bool backend = r->IsTextureBound(x->tile, x->tex);
+            if (x->answer && !backend) {
+                Count(BENCH_RT_MISMATCH, 1);
+            } else if (!x->answer && backend) {
+                Count(BENCH_RT_SAFE_MISS, 1);
             }
             break;
         }
-        case Op::CheckBound: {
-            const auto* x = reinterpret_cast<const CheckBoundArgs*>(a);
-            gBenchRThread[BENCH_RT_CHECKS]++;
-            const bool backend = r->IsTextureBound(x->tile, x->tex);
-            if (x->answer && !backend) {
-                gBenchRThread[BENCH_RT_MISMATCH]++;
-            } else if (!x->answer && backend) {
-                gBenchRThread[BENCH_RT_SAFE_MISS]++;
+        case Op::DumpPath:
+#ifdef SOH_BENCHMARK
+            strncpy(gBenchDumpPathGL, reinterpret_cast<const char*>(a), sizeof(gBenchDumpPathGL) - 1);
+#endif
+            break;
+        case Op::CheckClip: {
+            // Counted with the binding checks: a wrong answer here flips the picture.
+            Count(BENCH_RT_CHECKS, 1);
+            if (r->GetClipParameters().invertY != reinterpret_cast<const CheckArgs*>(a)->answer) {
+                Count(BENCH_RT_MISMATCH, 1);
             }
             break;
         }
     }
 }
 
-// --- Answered by the proxy ---------------------------------------------------------------------
+// --- Answered by the proxy -----------------------------------------------------------------------
 
 const char* GfxRenderingAPIThreaded::GetName() {
     return mName != nullptr ? mName : mInner->GetName();
@@ -340,8 +553,7 @@ GfxClipParameters GfxRenderingAPIThreaded::GetClipParameters() {
     }
     const bool invertY = mCurrentFb >= 0 && mCurrentFb < (int)mFbInvertY.size() && mFbInvertY[mCurrentFb];
     if (mChecks) {
-        auto* c = Emit<CheckBoundArgs>(Op::CheckClip);
-        c->answer = invertY;
+        Emit<CheckArgs>(Op::CheckClip)->answer = invertY;
     }
     return { mClipZ01, invertY };
 }
@@ -363,8 +575,7 @@ bool GfxRenderingAPIThreaded::IsTextureBound(int tile, uint32_t textureId) {
     if (!Recording()) {
         return mInner->IsTextureBound(tile, textureId);
     }
-    bool answer = mLazyBinds && textureId != 0 && tile >= 0 && tile < (int)(sizeof(mSelected) / sizeof(mSelected[0])) &&
-                  mSelected[tile] == textureId;
+    bool answer = mLazyBinds && textureId != 0 && tile >= 0 && tile < (int)kMaxTiles && mSelected[tile] == textureId;
     if (mChecks) {
         // The positive control: one true answer in 64 turned false. A false is always safe (the
         // interpreter binds as it did before §8.37), so the picture does not change; safe_miss must.
@@ -372,7 +583,7 @@ bool GfxRenderingAPIThreaded::IsTextureBound(int tile, uint32_t textureId) {
         if (mCorrupt && answer && (++sCorruptTick & 63) == 0) {
             answer = false;
         }
-        auto* c = Emit<CheckBoundArgs>(Op::CheckBound);
+        auto* c = Emit<CheckArgs>(Op::CheckBound);
         c->tile = tile;
         c->tex = textureId;
         c->answer = answer;
@@ -384,13 +595,15 @@ void* GfxRenderingAPIThreaded::GetFramebufferTextureId(int fbId) {
     if (!Recording()) {
         return mInner->GetFramebufferTextureId(fbId);
     }
-    if (fbId >= 0 && fbId < (int)mFbTextures.size()) {
+    if (fbId >= 0 && fbId < (int)mFbTextures.size() && mFbTextures[fbId] != nullptr) {
         return mFbTextures[fbId];
     }
-    Sync();
-    return mInner->GetFramebufferTextureId(fbId);
+    void* tex = nullptr;
+    Call([&] { tex = mInner->GetFramebufferTextureId(fbId); });
+    return tex;
 }
 
+// The GL backend's is a pure cast.
 ImTextureID GfxRenderingAPIThreaded::GetTextureById(int id) {
     return mInner->GetTextureById(id);
 }
@@ -399,8 +612,13 @@ FilteringMode GfxRenderingAPIThreaded::GetTextureFilter() {
     return mFilter;
 }
 
+// Reads the CVar store only: main thread.
 bool GfxRenderingAPIThreaded::WillBindLazily() {
     return mInner->WillBindLazily();
+}
+
+bool GfxRenderingAPIThreaded::DefersWork() {
+    return mMode == 2;
 }
 
 std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff>
@@ -420,45 +638,50 @@ GfxRenderingAPIThreaded::GetPixelDepth(int fb_id, const std::set<std::pair<float
         return res;
     }
 #endif
-    Sync();
-    return mInner->GetPixelDepth(fb_id, coordinates);
+    std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff> res;
+    Call([&] { res = mInner->GetPixelDepth(fb_id, coordinates); });
+    return res;
 }
 
-// --- Synchronous -------------------------------------------------------------------------------
+// --- Synchronous ---------------------------------------------------------------------------------
 
+// At startup, in direct mode.
 void GfxRenderingAPIThreaded::Init() {
     mInner->Init();
     mName = mInner->GetName();
     mMaxTextureSize = mInner->GetMaxTextureSize();
+    mFilter = mInner->GetTextureFilter();
     // Framebuffer 0 exists from Init and is current.
     const GfxClipParameters clip = mInner->GetClipParameters();
     mClipZ01 = clip.z_is_from_0_to_1;
     mFbInvertY.assign(1, clip.invertY);
     mCurrentFb = 0;
-    mFilter = mInner->GetTextureFilter();
 }
 
 ShaderProgram* GfxRenderingAPIThreaded::CreateAndLoadNewShader(uint64_t shaderId0, uint32_t shaderId1) {
-    Sync();
-    ShaderProgram* prg = mInner->CreateAndLoadNewShader(shaderId0, shaderId1);
+    ShaderProgram* prg = nullptr;
+    Call([&] { prg = mInner->CreateAndLoadNewShader(shaderId0, shaderId1); });
     mShaders[{ shaderId0, shaderId1 }] = prg;
     return prg;
 }
 
 int GfxRenderingAPIThreaded::CreateFramebuffer() {
-    Sync();
-    const int fb = mInner->CreateFramebuffer();
+    int fb = 0;
+    void* tex = nullptr;
+    Call([&] {
+        fb = mInner->CreateFramebuffer();
+        tex = mInner->GetFramebufferTextureId(fb);
+    });
     if (fb >= (int)mFbTextures.size()) {
         mFbTextures.resize(fb + 1, nullptr);
     }
     // Created here and never replaced: UpdateFramebufferParameters resizes it in place.
-    mFbTextures[fb] = mInner->GetFramebufferTextureId(fb);
+    mFbTextures[fb] = tex;
     return fb;
 }
 
 void GfxRenderingAPIThreaded::ReadFramebufferToCPU(int fbId, uint32_t width, uint32_t height, uint16_t* rgba16Buf) {
-    Sync();
-    mInner->ReadFramebufferToCPU(fbId, width, height, rgba16Buf);
+    Call([&] { mInner->ReadFramebufferToCPU(fbId, width, height, rgba16Buf); });
 }
 
 uint32_t GfxRenderingAPIThreaded::NewTexture() {
@@ -466,57 +689,113 @@ uint32_t GfxRenderingAPIThreaded::NewTexture() {
         return mInner->NewTexture();
     }
     if (mTexturePool.empty()) {
-        Sync();
-        for (size_t i = 0; i < kTexturePoolRefill; i++) {
-            mTexturePool.push_back(mInner->NewTexture());
-        }
+        Call([&] {
+            for (size_t i = 0; i < kTexturePoolRefill; i++) {
+                mTexturePool.push_back(mInner->NewTexture());
+            }
+        });
     }
     const uint32_t id = mTexturePool.back();
     mTexturePool.pop_back();
     return id;
 }
 
-void GfxRenderingAPIThreaded::FinishRender() {
-    Drain();
-    mInner->FinishRender();
+// Synchronous: the GL backend's also clears the interpreter's texture cache, which is the main
+// thread's (it waits meanwhile). A settings change, rare.
+void GfxRenderingAPIThreaded::SetTextureFilter(FilteringMode mode) {
+    mFilter = mode;
+    Call([&] { mInner->SetTextureFilter(mode); });
 }
 
-// --- Queued ------------------------------------------------------------------------------------
+// Called from inside the swap (Interpreter::SwapNow), which runs on the GL thread in mode 2.
+void GfxRenderingAPIThreaded::FinishRender() {
+    if (OnGlThread()) {
+        mInner->FinishRender();
+        return;
+    }
+    Call([&] { mInner->FinishRender(); });
+}
+
+// --- Queued --------------------------------------------------------------------------------------
 
 void GfxRenderingAPIThreaded::StartFrame() {
-    // The mode changes only here, with nothing left in the stream from the frame before.
-    int mode = CVarInt("gSettings.RenderThread", 0);
+    const int value = CVarInt("gSettings.RenderThread", 0);
+    const int mode = value == 0 ? 0 : (value == 2 || value == 4) ? 2 : 1;
 #ifdef SOH_BENCHMARK
-    mChecks = mode == 3;
-    mCorrupt = mChecks ? CVarInt("gSettings.ProbeRThreadCorrupt", 0) : 0;
+    const int checks = value >= 3;
 #else
-    if (mode == 3) {
-        mode = 1;
+    const int checks = 0;
+#endif
+    SetMode(mode);
+    mChecks = checks;
+#ifdef SOH_BENCHMARK
+    // The frame dump's path (§8.32) reaches the backend with the frame it belongs to (report 11).
+    const bool dump = gBenchDumpPath[0] != '\0';
+    if (dump && !Recording()) {
+        strncpy(gBenchDumpPathGL, gBenchDumpPath, sizeof(gBenchDumpPathGL) - 1);
     }
 #endif
-    if (mode == 2) {
-        mode = 1; // stage 2 is not built yet
-    }
-    if (mode != mMode) {
-        Drain();
-        mMode = mode;
-    }
+    mCorrupt = mChecks ? CVarInt("gSettings.ProbeRThreadCorrupt", 0) : 0;
     mLazyBinds = mInner->WillBindLazily();
     if (!Recording()) {
         mInner->StartFrame();
         return;
     }
-    gBenchRThread[BENCH_RT_FRAMES]++;
-    Emit<OneInt>(Op::StartFrame);
+    Count(BENCH_RT_FRAMES, 1);
+    // What the backend's StartFrame reads from the CVar store, read here (report 11 §11.4).
+    const size_t n = mInner->FrameSettingsSize();
+    auto* x = Emit<StartArgs>(Op::StartFrame, n);
+    x->settingsBytes = (uint32_t)n;
+    mInner->CaptureFrameSettings(reinterpret_cast<uint8_t*>(x) + sizeof(StartArgs));
+#ifdef SOH_BENCHMARK
+    if (dump) {
+        const size_t len = strnlen(gBenchDumpPath, sizeof(gBenchDumpPath) - 1);
+        char* p = Emit<char>(Op::DumpPath, len + 1);
+        memcpy(p, gBenchDumpPath, len);
+        p[len] = '\0';
+    }
+#endif
 }
 
 void GfxRenderingAPIThreaded::EndFrame() {
     if (!Recording()) {
         mInner->EndFrame();
+    } else {
+        Emit<OneInt>(Op::EndFrame);
+        if (mMode == 2) {
+            Publish();
+        } else {
+            Drain();
+        }
+    }
+#ifdef SOH_BENCHMARK
+    // The backend dumps from its own copy; this thread's is done with at the end of the frame.
+    gBenchDumpPath[0] = '\0';
+#endif
+}
+
+void GfxRenderingAPIThreaded::RunInOrder(void (*fn)(void*), void* arg) {
+    if (!Recording()) {
+        fn(arg);
         return;
     }
-    Emit<OneInt>(Op::EndFrame);
-    Drain();
+    *Emit<CallbackArgs>(Op::RunInOrder) = { fn, arg };
+}
+
+// The swap. Mode 2 lets this thread run one frame ahead of the GL thread and no more.
+void GfxRenderingAPIThreaded::RunAtFrameEnd(void (*fn)(void*), void* arg) {
+    if (mMode != 2) {
+        Drain();
+        fn(arg);
+        return;
+    }
+    *Emit<CallbackArgs>(Op::FrameEnd) = { fn, arg };
+    Publish();
+    {
+        std::lock_guard<std::mutex> lk(mMutex);
+        mFramesQueued++;
+    }
+    WaitWhile([&] { return mFramesQueued - mFramesDone > 1; });
 }
 
 void GfxRenderingAPIThreaded::UnloadShader(ShaderProgram* oldPrg) {
@@ -536,7 +815,7 @@ void GfxRenderingAPIThreaded::LoadShader(ShaderProgram* newPrg) {
 }
 
 void GfxRenderingAPIThreaded::SelectTexture(int tile, uint32_t textureId) {
-    if (tile >= 0 && tile < (int)(sizeof(mSelected) / sizeof(mSelected[0]))) {
+    if (tile >= 0 && tile < (int)kMaxTiles) {
         mSelected[tile] = textureId;
     }
     if (!Recording()) {
@@ -577,9 +856,7 @@ void GfxRenderingAPIThreaded::SetDepthTestAndMask(bool depth_test, bool z_upd) {
         mInner->SetDepthTestAndMask(depth_test, z_upd);
         return;
     }
-    auto* x = Emit<TwoBools>(Op::SetDepthTestAndMask);
-    x->a = depth_test;
-    x->b = z_upd;
+    *Emit<TwoBools>(Op::SetDepthTestAndMask) = { depth_test, z_upd };
 }
 
 void GfxRenderingAPIThreaded::SetZmodeDecal(bool decal) {
@@ -735,28 +1012,12 @@ void GfxRenderingAPIThreaded::DeleteTexture(uint32_t texId) {
     Emit<OneInt>(Op::DeleteTexture)->a = (int32_t)texId;
 }
 
-// Synchronous: the GL backend's also clears the interpreter's texture cache, which is the main
-// thread's. A settings change, rare.
-void GfxRenderingAPIThreaded::SetTextureFilter(FilteringMode mode) {
-    mFilter = mode;
-    Sync();
-    mInner->SetTextureFilter(mode);
-}
-
 void GfxRenderingAPIThreaded::SetSrgbMode() {
     if (!Recording()) {
         mInner->SetSrgbMode();
         return;
     }
     Emit<OneInt>(Op::SetSrgbMode);
-}
-
-void GfxRenderingAPIThreaded::RunInOrder(void (*fn)(void*), void* arg) {
-    if (!Recording()) {
-        fn(arg);
-        return;
-    }
-    *Emit<CallbackArgs>(Op::RunInOrder) = { fn, arg };
 }
 
 } // namespace Fast

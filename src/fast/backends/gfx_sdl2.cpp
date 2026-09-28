@@ -720,8 +720,27 @@ static void ReportFrameRate() {
     }
 }
 
+void GfxWindowBackendSDL2::LatchFrameSettings() {
+    mNextVsync = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(CVAR_VSYNC_ENABLED, 1);
+}
+
+bool GfxWindowBackendSDL2::MakeContextCurrent(bool current) {
+    if (mCtx == nullptr) {
+        return false;
+    }
+    if (SDL_GL_MakeCurrent(mWnd, current ? mCtx : nullptr) != 0) {
+        SPDLOG_ERROR("SDL_GL_MakeCurrent({}): {}", current, SDL_GetError());
+        return false;
+    }
+    return true;
+}
+
+// On report 11's GL thread this runs off the main thread, so the vsync setting comes from
+// LatchFrameSettings (main thread) rather than the CVar store, which is not thread-safe.
 void GfxWindowBackendSDL2::SwapBuffersBegin() {
-    bool nextVsyncEnabled = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(CVAR_VSYNC_ENABLED, 1);
+    bool nextVsyncEnabled = mNextVsync >= 0
+                                ? mNextVsync != 0
+                                : Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger(CVAR_VSYNC_ENABLED, 1);
 
     if (mVsyncEnabled != nextVsyncEnabled) {
         mVsyncEnabled = nextVsyncEnabled;

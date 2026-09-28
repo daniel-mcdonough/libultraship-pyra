@@ -142,6 +142,9 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
     void ClearShaderCache() override;
     void FlushDeferredDraws() override;
     bool WillBindLazily() override;
+    size_t FrameSettingsSize() override;
+    void CaptureFrameSettings(void* out) override;
+    void StartFrameWith(const void* settings) override;
     void ReadFramebufferToCPU(int fbId, uint32_t width, uint32_t height, uint16_t* rgba16Buf) override;
     void ResolveMSAAColorBuffer(int fbIdTarger, int fbIdSrc) override;
     std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff>
@@ -222,6 +225,8 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
     static constexpr size_t kGroupChunkFloats = 8192;
     std::unique_ptr<float[]> mGroupArena;
     size_t mGroupArenaUsed = 0;
+    // CVAR_Z_FIGHTING_MODE for this frame, from StartFrameWith (report 11).
+    int mZFightingMode = 0;
 #ifdef SOH_BENCHMARK
     // gSettings.ProbeSkipDraw, read each frame (report 8 §8.36).
     int mBenchSkipDraw = 0;

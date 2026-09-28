@@ -345,7 +345,10 @@ void Gui::ImGuiBackendNewFrame() {
     switch (Context::GetInstance()->GetWindow()->GetWindowBackend()) {
 #ifdef ENABLE_OPENGL
         case WindowBackend::FAST3D_SDL_OPENGL:
-            ImGui_ImplOpenGL3_NewFrame();
+            // GL work (device objects on first use): in order with the renderer's calls, on the GL thread
+            // when report 11's proxy has one. In steady state it only checks they exist.
+            mInterpreter.lock()->GetCurrentRenderingAPI()->RunInOrder([](void*) { ImGui_ImplOpenGL3_NewFrame(); },
+                                                                      nullptr);
             break;
 #endif
 
@@ -875,11 +878,31 @@ void Gui::ImGuiRenderDrawData(ImDrawData* data) {
 
 #ifdef ENABLE_OPENGL
         case WindowBackend::FAST3D_SDL_OPENGL:
-            // In order with the game's GL calls: through report 11's proxy when it records. The draw
-            // data stays valid until the next ImGui::NewFrame, and the stream drains before that.
-            mInterpreter.lock()->GetCurrentRenderingAPI()->RunInOrder(
-                [](void* d) { ImGui_ImplOpenGL3_RenderDrawData(static_cast<ImDrawData*>(d)); }, data);
+        {
+            // In order with the game's GL calls: through report 11's proxy when it records. Replayed on
+            // the same thread, the draw data stays valid until the next ImGui::NewFrame, and the stream
+            // drains before that. On its GL thread it does not, so the lists are copied for it.
+            Fast::GfxRenderingAPI* api = mInterpreter.lock()->GetCurrentRenderingAPI();
+            if (!api->DefersWork()) {
+                api->RunInOrder([](void* d) { ImGui_ImplOpenGL3_RenderDrawData(static_cast<ImDrawData*>(d)); }, data);
+                break;
+            }
+            ImDrawData* copy = IM_NEW(ImDrawData)(*data);
+            for (int i = 0; i < copy->CmdLists.Size; i++) {
+                copy->CmdLists[i] = data->CmdLists[i]->CloneOutput();
+            }
+            api->RunInOrder(
+                [](void* d) {
+                    ImDrawData* dd = static_cast<ImDrawData*>(d);
+                    ImGui_ImplOpenGL3_RenderDrawData(dd);
+                    for (int i = 0; i < dd->CmdLists.Size; i++) {
+                        IM_DELETE(dd->CmdLists[i]);
+                    }
+                    IM_DELETE(dd);
+                },
+                copy);
             break;
+        }
 #endif
 
 #ifdef __APPLE__

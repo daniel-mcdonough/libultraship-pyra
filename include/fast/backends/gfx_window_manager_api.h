@@ -37,6 +37,15 @@ class GfxWindowBackend {
     virtual bool IsRunning() = 0;
     virtual void Destroy() = 0;
     virtual bool IsFullscreen() = 0;
+    // Report 11: reads the settings SwapBuffersBegin uses (vsync) from the CVar store, on the main
+    // thread, before a swap that may run on the GL thread.
+    virtual void LatchFrameSettings() {
+    }
+    // Report 11: makes the GL context current on the calling thread, or releases it. False if the
+    // backend cannot, or the driver refused.
+    virtual bool MakeContextCurrent(bool current) {
+        return false;
+    }
 
   protected:
     void (*mOnFullscreenChanged)(bool isNowFullscreen);

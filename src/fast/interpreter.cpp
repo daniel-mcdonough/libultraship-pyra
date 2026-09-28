@@ -4949,6 +4949,7 @@ uint64_t gBenchOpcodes[256] = {};
 uint64_t gBenchOpNanos[256] = {};
 int gBenchOpTime = 0;
 char gBenchDumpPath[512] = {};
+char gBenchDumpPathGL[512] = {};
 int gBenchDumpFb = 0;
 uint32_t gBenchFbEpoch = 0;
 uint64_t gBenchBatchCause[BENCH_BRK_SETS] = {};
@@ -4990,6 +4991,13 @@ void Interpreter::SwapPending() {
         return;
     }
     mSwapPending = false;
+    // Report 11: with gSettings.RenderThread 2 the swap runs on the GL thread, after the frame's GL work.
+    // What it reads from the CVar store is read here, on this thread.
+    mWapi->LatchFrameSettings();
+    mRapi->RunAtFrameEnd([](void* self) { static_cast<Interpreter*>(self)->SwapNow(); }, this);
+}
+
+void Interpreter::SwapNow() {
 #ifdef SOH_BENCHMARK
     // The swap's CPU time, the driver's per-frame kick, as work rather than as waiting; it goes into
     // eof_cpu_us with EndFrame's. swap_us is the swap's wall time and mostly waiting.

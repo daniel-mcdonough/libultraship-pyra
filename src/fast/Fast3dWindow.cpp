@@ -51,6 +51,10 @@ Fast3dWindow::Fast3dWindow() : Fast3dWindow(std::vector<std::shared_ptr<Ship::Gu
 
 Fast3dWindow::~Fast3dWindow() {
     SPDLOG_DEBUG("destruct fast3dwindow");
+    // Report 11: the GL context back on this thread before anything else here touches GL.
+    if (auto* threaded = dynamic_cast<GfxRenderingAPIThreaded*>(mRenderingApi)) {
+        threaded->Shutdown();
+    }
     mInterpreter->Destroy();
     delete mRenderingApi;
     delete mWindowManagerApi;
@@ -149,6 +153,8 @@ void Fast3dWindow::InitWindowManager() {
             // gSettings.RenderThread (report 11): the proxy forwards every call unless the CVar says otherwise.
             mRenderingApi = new GfxRenderingAPIThreaded(new GfxRenderingAPIOGL());
             mWindowManagerApi = new GfxWindowBackendSDL2();
+            // Mode 2 moves the context between threads, which the window backend owns.
+            static_cast<GfxRenderingAPIThreaded*>(mRenderingApi)->SetWindowBackend(mWindowManagerApi);
             break;
 #endif
 #ifdef __APPLE__

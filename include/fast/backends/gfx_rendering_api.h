@@ -93,6 +93,28 @@ class GfxRenderingAPI {
     virtual void RunInOrder(void (*fn)(void*), void* arg) {
         fn(arg);
     }
+    // The end of a frame: the swap and anything that must follow the frame's GL work (report 11). At once
+    // for a backend. Report 11's proxy runs it after the frame's calls, on the GL thread in its threaded
+    // mode, and holds the caller back while more than one frame is in flight.
+    virtual void RunAtFrameEnd(void (*fn)(void*), void* arg) {
+        fn(arg);
+    }
+    // True while GL work is done later on another thread (report 11's threaded mode): data handed to
+    // RunInOrder must then outlive the caller's frame.
+    virtual bool DefersWork() {
+        return false;
+    }
+    // The settings StartFrame reads from the CVar store, captured on the main thread so a GL thread
+    // never reads the store (it is not thread-safe). StartFrame() is CaptureFrameSettings then
+    // StartFrameWith; report 11's proxy captures when it records and applies when it replays.
+    virtual size_t FrameSettingsSize() {
+        return 0;
+    }
+    virtual void CaptureFrameSettings(void* out) {
+    }
+    virtual void StartFrameWith(const void* settings) {
+        StartFrame();
+    }
     virtual void ReadFramebufferToCPU(int fbId, uint32_t width, uint32_t height, uint16_t* rgba16Buf) = 0;
     virtual void ResolveMSAAColorBuffer(int fbIdTarger, int fbIdSrc) = 0;
     virtual std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff>

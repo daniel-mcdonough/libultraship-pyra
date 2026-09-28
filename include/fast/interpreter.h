@@ -238,6 +238,9 @@ extern "C" int gBenchOpTime;
 // interpreter sets each frame - to this path as a binary PPM at the end of the frame, then clears it. The benchmark sets it at a fixed frame of a segment, so both arms
 // of an A/B are captured at the same frame rather than at the same wall-clock time (§8.32).
 extern "C" char gBenchDumpPath[512];
+// The backend's copy of gBenchDumpPath for the frame it is drawing (report 11): report 11's proxy hands it
+// over at the frame's start, so a GL thread never reads the main thread's buffer. The backend clears it.
+extern "C" char gBenchDumpPathGL[512];
 extern "C" int gBenchDumpFb;
 // Bumped by the backend at every framebuffer switch, clear, copy or resolve and at frame start: a
 // barrier the §8.40 grouping count must not reorder across.
@@ -523,6 +526,8 @@ class Interpreter {
     void EndFrame();
     // gSettings.LeanSwap: EndFrame flushes and leaves the swap for the next StartFrame.
     void SwapPending();
+    // The swap itself: SwapPending hands it to GfxRenderingAPI::RunAtFrameEnd (report 11).
+    void SwapNow();
     void HandleWindowEvents();
     bool IsFrameReady();
     bool ViewportMatchesRendererResolution();

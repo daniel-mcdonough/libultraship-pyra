@@ -2,25 +2,33 @@
 
 #include "gfx_rendering_api.h"
 
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 namespace Fast {
 
+class GfxWindowBackend;
+
 // Counters for the benchmark's BENCH rthread line (report 11), cumulative; the benchmark diffs them
-// across a segment. Written on the thread that replays.
+// across a segment. Written with atomic adds on whichever thread counts them; read with atomic loads.
 enum BenchRThread {
     BENCH_RT_RECORDS,   // calls recorded
     BENCH_RT_BYTES,     // bytes recorded, payloads included
-    BENCH_RT_REPLAY_NS, // CPU time replaying: what would leave the main thread
+    BENCH_RT_REPLAY_NS, // CPU time replaying: what leaves (mode 1: would leave) the main thread
     BENCH_RT_SYNCS,     // calls that waited for the stream to drain (shader and framebuffer creation, reads)
-    BENCH_RT_CHECKS,    // answers the proxy gave that mode 3 re-asked of the backend at replay
+    BENCH_RT_CHECKS,    // answers the proxy gave that modes 3 and 4 re-asked of the backend at replay
     BENCH_RT_MISMATCH,  // ... where the proxy said bound and the backend not: a wrong texture would be drawn
     BENCH_RT_SAFE_MISS, // ... where the proxy said not bound and the backend bound: an extra bind, same picture
     BENCH_RT_FRAMES,    // frames recorded (not direct)
+    BENCH_RT_WAIT_NS,   // wall time the main thread waited for the GL thread (frames in flight, syncs)
     BENCH_RT_COUNT
 };
 extern "C" uint64_t gBenchRThread[BENCH_RT_COUNT];
@@ -29,18 +37,23 @@ extern "C" uint64_t gBenchRThread[BENCH_RT_COUNT];
 // stream and replays it into the real backend. Read on the main thread at each frame start.
 //   0  direct: every call is forwarded as it arrives (the default).
 //   1  record, and replay on the same thread when the frame ends or a call needs an answer.
-//   3  1 plus checks: every answer the proxy gave from its own state is re-asked of the backend at
-//      replay and counted (benchmark builds; gSettings.ProbeRThreadCorrupt=1 is the positive control).
-// Stage 2 adds 2, the replay on a GL thread. Calls that need an answer at once are answered from the
-// proxy's own state where that is exact (11.3), and otherwise wait for the stream to drain.
+//   2  record, and replay on a GL thread that owns the context; at most one frame in flight.
+//   3, 4  1 and 2 plus checks: every answer the proxy gave from its own state is re-asked of the backend
+//      at replay and counted (benchmark builds; gSettings.ProbeRThreadCorrupt=1 is the positive control).
+// Calls that need an answer at once are answered from the proxy's own state where that is exact
+// (report 11 §11.3), and otherwise wait for the stream to drain and run where the context is.
 class GfxRenderingAPIThreaded final : public GfxRenderingAPI {
   public:
     explicit GfxRenderingAPIThreaded(GfxRenderingAPI* inner);
     ~GfxRenderingAPIThreaded() override;
 
-    GfxRenderingAPI* Inner() const {
-        return mInner.get();
+    // The window backend that owns the context; needed for mode 2. Without it mode 2 runs as 1.
+    void SetWindowBackend(GfxWindowBackend* wapi) {
+        mWapi = wapi;
     }
+    // Back to direct mode with the context on the calling thread, and the GL thread stopped. For
+    // teardown, before anything else touches GL.
+    void Shutdown();
 
     const char* GetName() override;
     int GetMaxTextureSize() override;
@@ -90,6 +103,8 @@ class GfxRenderingAPIThreaded final : public GfxRenderingAPI {
     ImTextureID GetTextureById(int id) override;
     bool WillBindLazily() override;
     void RunInOrder(void (*fn)(void*), void* arg) override;
+    void RunAtFrameEnd(void (*fn)(void*), void* arg) override;
+    bool DefersWork() override;
 
   private:
     enum class Op : uint16_t;
@@ -98,37 +113,64 @@ class GfxRenderingAPIThreaded final : public GfxRenderingAPI {
         uint16_t pad;
         uint32_t size; // the whole record, header and payload, a multiple of 8
     };
+    struct Block {
+        std::unique_ptr<uint8_t[]> data;
+        size_t cap = 0;
+        size_t used = 0;
+    };
 
     bool Recording() const {
         return mMode != 0;
     }
+    bool OnGlThread() const {
+        return mGlThreadId == std::this_thread::get_id();
+    }
     // A record of type T with `extra` bytes of payload after it; the pointer stays valid until the
-    // stream is next replayed.
+    // next Emit or Publish.
     template <typename T> T* Emit(Op op, size_t extra = 0);
-    uint8_t* Reserve(size_t bytes);
-    // Replays everything recorded so far, on this thread.
+    // Hands the block being written to the replay: the GL thread's queue (mode 2), or the list Drain
+    // replays (mode 1).
+    void Publish();
+    // Everything recorded so far has been replayed when it returns: here (mode 1), or by the GL thread
+    // (mode 2), which it waits for.
     void Drain();
+    void ReplayBlock(Block* b);
     void Replay(const Header* h);
-    // A call that needs the backend now: the stream drains first.
-    void Sync();
+    Block* TakeBlock(size_t atLeast);
+    void Recycle(Block* b);
+    // Runs fn where the context is, after everything recorded so far, and returns when it has run.
+    void Call(const std::function<void()>& fn);
+    void SetMode(int mode);
+    void GlThreadMain();
+    // Waits on mDone while busy() holds (mMutex held around busy), counting the wall time.
+    void WaitWhile(const std::function<bool()>& busy);
 
     std::unique_ptr<GfxRenderingAPI> mInner;
-    int mMode = 0;
+    GfxWindowBackend* mWapi = nullptr;
+    int mMode = 0; // 0 direct, 1 same thread, 2 GL thread
     int mChecks = 0;
     int mCorrupt = 0;
+    bool mThreadFailed = false;
 
-    // The stream: one growing buffer in stage 1, reused every frame.
-    std::vector<uint8_t> mStream;
-    size_t mStreamUsed = 0;
+    // The stream. Blocks are written on the main thread and replayed, then recycled, on the replaying one.
+    static constexpr size_t kBlockBytes = 64 * 1024;
+    Block* mCur = nullptr;
+    std::vector<Block*> mPending;  // mode 1
+    std::mutex mMutex;             // guards everything down to mStop
+    std::condition_variable mWake; // the GL thread waits on it for blocks
+    std::condition_variable mDone; // the main thread waits on it for progress
+    std::deque<Block*> mQueue;
+    std::vector<Block*> mFree;
+    uint64_t mBlocksQueued = 0, mBlocksDone = 0;
+    uint64_t mFramesQueued = 0, mFramesDone = 0;
+    bool mStop = false;
+    bool mAcquireOk = false;
+    std::thread mThread;
+    std::thread::id mGlThreadId;
 
     // State the proxy answers from (report 11 §11.3).
     const char* mName = nullptr;
     int mMaxTextureSize = 0;
-    // GetClipParameters depends on the framebuffer being drawn to: each one's flip, as last set by
-    // UpdateFramebufferParameters, and the current one, as set by StartDrawToFramebuffer.
-    bool mClipZ01 = false;
-    std::vector<bool> mFbInvertY;
-    int mCurrentFb = 0;
     FilteringMode mFilter = FILTER_THREE_POINT;
     std::map<std::pair<uint64_t, uint32_t>, ShaderProgram*> mShaders;
     std::vector<void*> mFbTextures;
@@ -137,6 +179,11 @@ class GfxRenderingAPIThreaded final : public GfxRenderingAPI {
     // that alone this frame (gSettings.LeanGroup): if not, the proxy answers false, which is safe.
     uint32_t mSelected[8] = {};
     bool mLazyBinds = false;
+    // GetClipParameters depends on the framebuffer being drawn to: each one's flip, as last set by
+    // UpdateFramebufferParameters, and the current one, as set by StartDrawToFramebuffer.
+    bool mClipZ01 = false;
+    std::vector<bool> mFbInvertY;
+    int mCurrentFb = 0;
 };
 
 } // namespace Fast

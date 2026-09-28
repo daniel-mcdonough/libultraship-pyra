@@ -38,6 +38,8 @@ class GfxWindowBackendSDL2 final : public GfxWindowBackend {
     bool IsRunning() override;
     void Destroy() override;
     bool IsFullscreen() override;
+    void LatchFrameSettings() override;
+    bool MakeContextCurrent(bool current) override;
 
   private:
     void SetFullscreenImpl(bool on, bool call_callback);
@@ -52,7 +54,9 @@ class GfxWindowBackendSDL2 final : public GfxWindowBackend {
 
     SDL_Window* mWnd;
     SDL_Rect mCursorClip;
-    SDL_GLContext mCtx;
+    SDL_GLContext mCtx = nullptr;
+    // CVAR_VSYNC_ENABLED as LatchFrameSettings last read it; -1 until then (SwapBuffersBegin reads it).
+    int mNextVsync = -1;
     SDL_Renderer* mRenderer;
     int mSdlToLusTable[512];
     float mMouseWheelX = 0.0f;
