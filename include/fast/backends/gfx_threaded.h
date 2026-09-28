@@ -34,9 +34,17 @@ enum BenchRThread {
 };
 extern "C" uint64_t gBenchRThread[BENCH_RT_COUNT];
 
+// The default for gSettings.RenderThread: 2 on GLES2 (the Pyra), where the owner chose 30 fps at 750 MHz
+// with the GL thread (report 11 §11.14); 0 elsewhere.
+#ifdef USE_OPENGLES2
+constexpr int kRenderThreadDefault = 2;
+#else
+constexpr int kRenderThreadDefault = 0;
+#endif
+
 // gSettings.RenderThread (report 11): a GfxRenderingAPI that records every call into a command
 // stream and replays it into the real backend. Read on the main thread at each frame start.
-//   0  direct: every call is forwarded as it arrives (the default).
+//   0  direct: every call is forwarded as it arrives (the default off GLES2).
 //   1  record, and replay on the same thread when the frame ends or a call needs an answer.
 //   2  record, and replay on a GL thread that owns the context; at most one frame in flight.
 //   3, 4  1 and 2 plus checks: every answer the proxy gave from its own state is re-asked of the backend

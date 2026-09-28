@@ -720,7 +720,7 @@ void GfxRenderingAPIThreaded::FinishRender() {
 // --- Queued --------------------------------------------------------------------------------------
 
 void GfxRenderingAPIThreaded::StartFrame() {
-    const int value = CVarInt("gSettings.RenderThread", 0);
+    const int value = CVarInt("gSettings.RenderThread", kRenderThreadDefault);
     const int mode = value == 0 ? 0 : (value == 2 || value == 4) ? 2 : 1;
 #ifdef SOH_BENCHMARK
     const int checks = value >= 3;
