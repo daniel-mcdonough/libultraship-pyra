@@ -93,6 +93,12 @@ class GfxRenderingAPI {
     virtual void RunInOrder(void (*fn)(void*), void* arg) {
         fn(arg);
     }
+    // Runs fn(arg) after the calls made on this object and returns when it has run: where the context is,
+    // which for report 11's proxy in its threaded mode is the GL thread, while the caller waits. For GL
+    // work whose results the caller reads at once (ImGui's font atlas).
+    virtual void RunNow(void (*fn)(void*), void* arg) {
+        fn(arg);
+    }
     // The end of a frame: the swap and anything that must follow the frame's GL work (report 11). At once
     // for a backend. Report 11's proxy runs it after the frame's calls, on the GL thread in its threaded
     // mode, and holds the caller back while more than one frame is in flight.

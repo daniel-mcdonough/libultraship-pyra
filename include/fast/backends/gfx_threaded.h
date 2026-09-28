@@ -104,6 +104,7 @@ class GfxRenderingAPIThreaded final : public GfxRenderingAPI {
     ImTextureID GetTextureById(int id) override;
     bool WillBindLazily() override;
     void RunInOrder(void (*fn)(void*), void* arg) override;
+    void RunNow(void (*fn)(void*), void* arg) override;
     void RunAtFrameEnd(void (*fn)(void*), void* arg) override;
     bool DefersWork() override;
 

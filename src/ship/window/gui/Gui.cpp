@@ -344,12 +344,19 @@ ImGuiID Gui::GetMainGameWindowID() {
 void Gui::ImGuiBackendNewFrame() {
     switch (Context::GetInstance()->GetWindow()->GetWindowBackend()) {
 #ifdef ENABLE_OPENGL
-        case WindowBackend::FAST3D_SDL_OPENGL:
+        case WindowBackend::FAST3D_SDL_OPENGL: {
             // GL work (device objects on first use): in order with the renderer's calls, on the GL thread
-            // when report 11's proxy has one. In steady state it only checks they exist.
-            mInterpreter.lock()->GetCurrentRenderingAPI()->RunInOrder([](void*) { ImGui_ImplOpenGL3_NewFrame(); },
-                                                                      nullptr);
+            // when report 11's proxy has one. In steady state it only checks they exist. On first use it
+            // also builds the font atlas and sets its TexID, which ImGui::NewFrame reads next on this
+            // thread, so until the font texture exists the call waits for it to have run.
+            Fast::GfxRenderingAPI* api = mInterpreter.lock()->GetCurrentRenderingAPI();
+            if (ImGui::GetIO().Fonts->TexID == nullptr) {
+                api->RunNow([](void*) { ImGui_ImplOpenGL3_NewFrame(); }, nullptr);
+            } else {
+                api->RunInOrder([](void*) { ImGui_ImplOpenGL3_NewFrame(); }, nullptr);
+            }
             break;
+        }
 #endif
 
 #ifdef ENABLE_DX11

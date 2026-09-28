@@ -783,6 +783,10 @@ void GfxRenderingAPIThreaded::RunInOrder(void (*fn)(void*), void* arg) {
     *Emit<CallbackArgs>(Op::RunInOrder) = { fn, arg };
 }
 
+void GfxRenderingAPIThreaded::RunNow(void (*fn)(void*), void* arg) {
+    Call([&] { fn(arg); });
+}
+
 // The swap. Mode 2 lets this thread run one frame ahead of the GL thread and no more.
 void GfxRenderingAPIThreaded::RunAtFrameEnd(void (*fn)(void*), void* arg) {
     if (mMode != 2) {
