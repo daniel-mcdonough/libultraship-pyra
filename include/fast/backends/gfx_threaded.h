@@ -22,13 +22,14 @@ class GfxWindowBackend;
 enum BenchRThread {
     BENCH_RT_RECORDS,   // calls recorded
     BENCH_RT_BYTES,     // bytes recorded, payloads included
-    BENCH_RT_REPLAY_NS, // CPU time replaying: what leaves (mode 1: would leave) the main thread
+    BENCH_RT_REPLAY_NS, // CPU time replaying on the main thread (mode 1): what would leave it
     BENCH_RT_SYNCS,     // calls that waited for the stream to drain (shader and framebuffer creation, reads)
     BENCH_RT_CHECKS,    // answers the proxy gave that modes 3 and 4 re-asked of the backend at replay
     BENCH_RT_MISMATCH,  // ... where the proxy said bound and the backend not: a wrong texture would be drawn
     BENCH_RT_SAFE_MISS, // ... where the proxy said not bound and the backend bound: an extra bind, same picture
     BENCH_RT_FRAMES,    // frames recorded (not direct)
     BENCH_RT_WAIT_NS,   // wall time the main thread waited for the GL thread (frames in flight, syncs)
+    BENCH_RT_GL_NS,     // the GL thread's CPU time replaying (mode 2), the swap's CPU included
     BENCH_RT_COUNT
 };
 extern "C" uint64_t gBenchRThread[BENCH_RT_COUNT];

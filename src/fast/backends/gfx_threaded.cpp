@@ -312,7 +312,7 @@ void GfxRenderingAPIThreaded::GlThreadMain() {
         lk.unlock();
         const uint64_t start = ThreadCpuNanos();
         ReplayBlock(b);
-        Count(BENCH_RT_REPLAY_NS, ThreadCpuNanos() - start);
+        Count(BENCH_RT_GL_NS, ThreadCpuNanos() - start);
         b->used = 0;
         lk.lock();
         mFree.push_back(b);
@@ -709,7 +709,8 @@ void GfxRenderingAPIThreaded::SetTextureFilter(FilteringMode mode) {
 
 // Called from inside the swap (Interpreter::SwapNow), which runs on the GL thread in mode 2.
 void GfxRenderingAPIThreaded::FinishRender() {
-    if (OnGlThread()) {
+    if (OnGlThread() || mMode != 2) {
+        // Modes 0 and 1: RunAtFrameEnd drained the stream before the swap.
         mInner->FinishRender();
         return;
     }
