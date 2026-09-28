@@ -8,6 +8,7 @@
 #include "fast/backends/gfx_sdl.h"
 #include "fast/backends/gfx_dxgi.h"
 #include "fast/backends/gfx_opengl.h"
+#include "fast/backends/gfx_threaded.h"
 #include "fast/backends/gfx_metal.h"
 #include "fast/backends/gfx_direct3d_common.h"
 #include "fast/backends/gfx_direct3d11.h"
@@ -145,7 +146,8 @@ void Fast3dWindow::InitWindowManager() {
 #endif
 #ifdef ENABLE_OPENGL
         case Ship::WindowBackend::FAST3D_SDL_OPENGL:
-            mRenderingApi = new GfxRenderingAPIOGL();
+            // gSettings.RenderThread (report 11): the proxy forwards every call unless the CVar says otherwise.
+            mRenderingApi = new GfxRenderingAPIThreaded(new GfxRenderingAPIOGL());
             mWindowManagerApi = new GfxWindowBackendSDL2();
             break;
 #endif

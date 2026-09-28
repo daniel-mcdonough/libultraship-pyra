@@ -141,6 +141,7 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
     void DiscardDepthStencil() override;
     void ClearShaderCache() override;
     void FlushDeferredDraws() override;
+    bool WillBindLazily() override;
     void ReadFramebufferToCPU(int fbId, uint32_t width, uint32_t height, uint16_t* rgba16Buf) override;
     void ResolveMSAAColorBuffer(int fbIdTarger, int fbIdSrc) override;
     std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff>

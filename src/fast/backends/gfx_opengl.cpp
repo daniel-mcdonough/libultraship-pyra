@@ -1816,28 +1816,16 @@ void GfxRenderingAPIOGL::Init() {
 void GfxRenderingAPIOGL::OnResize() {
 }
 
-void GfxRenderingAPIOGL::StartFrame() {
-    FlushGroups();
-#ifdef SOH_BENCHMARK
-    gBenchFbEpoch++;
-#endif
-    mFrameCount++;
+// gSettings.LeanGLState and gSettings.LeanGroup as StartFrame applies them.
+static void ReadLeanModes(int& lean, int& group) {
 #ifdef USE_OPENGLES2
     // Client-side vertex arrays (mode 3) are legal in GLES2 but not in a desktop core profile.
     constexpr int kLeanGLStateDefault = 3;
 #else
     constexpr int kLeanGLStateDefault = 0;
 #endif
-    const int lean = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanGLState",
-                                                                                     kLeanGLStateDefault);
-    // Re-establish the attribute shadow every frame rather than trust that nothing else in the
-    // context (ImGui draws between frames) left the arrays exactly as it found them; and on any
-    // change of mode, since mode 0 does not maintain the shadow.
-    if (lean >= 1 || lean != mLeanGLState) {
-        mLeanGLState = lean;
-        ForgetVertexAttribs(true);
-    }
-    mLeanGLState = lean;
+    lean = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanGLState",
+                                                                          kLeanGLStateDefault);
     // gSettings.LeanGroup (§8.41): defer groupable draws and replay them grouped by program and
     // textures. Only on client arrays, which it draws from. The GLES2 default: −5.8% of the Market's
     // window CPU. Not exact - where two opaque surfaces tie in depth the other may win (±1 level).
@@ -1846,8 +1834,33 @@ void GfxRenderingAPIOGL::StartFrame() {
 #else
     constexpr int kLeanGroupDefault = 0;
 #endif
-    const int group = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanGroup",
-                                                                                      kLeanGroupDefault);
+    group = Ship::Context::GetInstance()->GetConsoleVariables()->GetInteger("gSettings.LeanGroup",
+                                                                           kLeanGroupDefault);
+}
+
+// Grouped, IsTextureBound answers from the last SelectTexture per tile alone.
+bool GfxRenderingAPIOGL::WillBindLazily() {
+    int lean, group;
+    ReadLeanModes(lean, group);
+    return lean >= 3 && group != 0;
+}
+
+void GfxRenderingAPIOGL::StartFrame() {
+    FlushGroups();
+#ifdef SOH_BENCHMARK
+    gBenchFbEpoch++;
+#endif
+    mFrameCount++;
+    int lean, group;
+    ReadLeanModes(lean, group);
+    // Re-establish the attribute shadow every frame rather than trust that nothing else in the
+    // context (ImGui draws between frames) left the arrays exactly as it found them; and on any
+    // change of mode, since mode 0 does not maintain the shadow.
+    if (lean >= 1 || lean != mLeanGLState) {
+        mLeanGLState = lean;
+        ForgetVertexAttribs(true);
+    }
+    mLeanGLState = lean;
     SetLeanGroup(lean >= 3 && group != 0 ? 1 : 0);
 #ifdef SOH_BENCHMARK
     // gSettings.ProbeSkipDraw (§8.36), benchmark builds only: how much of the render thread is the

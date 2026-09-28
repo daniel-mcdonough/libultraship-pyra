@@ -82,6 +82,17 @@ class GfxRenderingAPI {
     // the end of the interpreter's frame, before the GUI draws into the same context.
     virtual void FlushDeferredDraws() {
     }
+    // True when IsTextureBound will answer, in the frame about to start, from the last SelectTexture
+    // per tile alone (the GLES2 backend's gSettings.LeanGroup). Reads the settings StartFrame is about
+    // to apply; called on the main thread before it. Report 11's proxy shadows the answer then.
+    virtual bool WillBindLazily() {
+        return false;
+    }
+    // Runs fn(arg) in order with the calls made on this object: at once for a backend, when the
+    // stream reaches it for report 11's proxy. For GL work done outside the interface (ImGui's draw).
+    virtual void RunInOrder(void (*fn)(void*), void* arg) {
+        fn(arg);
+    }
     virtual void ReadFramebufferToCPU(int fbId, uint32_t width, uint32_t height, uint16_t* rgba16Buf) = 0;
     virtual void ResolveMSAAColorBuffer(int fbIdTarger, int fbIdSrc) = 0;
     virtual std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff>

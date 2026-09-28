@@ -875,7 +875,10 @@ void Gui::ImGuiRenderDrawData(ImDrawData* data) {
 
 #ifdef ENABLE_OPENGL
         case WindowBackend::FAST3D_SDL_OPENGL:
-            ImGui_ImplOpenGL3_RenderDrawData(data);
+            // In order with the game's GL calls: through report 11's proxy when it records. The draw
+            // data stays valid until the next ImGui::NewFrame, and the stream drains before that.
+            mInterpreter.lock()->GetCurrentRenderingAPI()->RunInOrder(
+                [](void* d) { ImGui_ImplOpenGL3_RenderDrawData(static_cast<ImDrawData*>(d)); }, data);
             break;
 #endif
 
