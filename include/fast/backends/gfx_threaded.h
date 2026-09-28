@@ -106,6 +106,7 @@ class GfxRenderingAPIThreaded final : public GfxRenderingAPI {
     void SetCurrentPrimDepth(float depth) override;
     bool WillBindLazily() override;
     void RunInOrder(void (*fn)(void*), void* arg) override;
+    void RunNow(void (*fn)(void*), void* arg) override;
     void RunAtFrameEnd(void (*fn)(void*), void* arg) override;
     bool DefersWork() override;
 
