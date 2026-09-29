@@ -773,6 +773,11 @@ void Gui::DrawGame() {
         }
     }
     uintptr_t fb = Ship::Context::GetInstance()->GetWindow()->GetGfxFrameBuffer();
+#ifdef SOH_BENCHMARK
+    if (gBenchSkipFlat & 1024) {
+        fb = 0;
+    }
+#endif
     if (fb) {
         ImGui::SetCursorPos(pos);
 #ifdef ENABLE_OPENGL

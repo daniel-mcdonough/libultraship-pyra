@@ -221,7 +221,9 @@ extern "C" void (*gBenchSplitHook)(int stage);
 // block to skip, to size the input, post-draw and ImGui blocks. Probe only; the picture may be wrong.
 // 1 WriteToPad, 2 rumble/LED, 4 mouse (soh), 8 audio update (soh), 16 OnGameFrameUpdate hooks (soh),
 // 32 DrawMenu's menus and windows, 64 the SDL backend's NewFrame, 128 DrawFloatingWindows,
-// 256 HandleMouseCapture and the mouse state manager, 512 the game overlay.
+// 256 HandleMouseCapture and the mouse state manager, 512 the game overlay, 1024 the game framebuffer's
+// quad in the present pass (§8.52: what a display-controller plane would take off the GPU; the window
+// shows only the clear).
 extern "C" int gBenchSkipFlat;
 // When set, the renderer calls glFinish before the swap and times it, splitting "the GPU had not
 // finished the frame" from "presenting it took the time". Off by default: glFinish serialises CPU
