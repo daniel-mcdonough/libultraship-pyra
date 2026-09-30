@@ -3389,6 +3389,18 @@ static void ValidateLookupCache() {
     }
 }
 
+// Drops the cache and the managers it holds. Called from Destroy as well: left to static teardown,
+// sLookupRm is the last reference to the ResourceManager, whose destructor then runs after the
+// Context and its logger are gone and segfaults at every quit (TESTING trap 18).
+static void ReleaseLookupCache() {
+    sLookupCache.textures.clear();
+    sLookupCache.rawPointers.clear();
+    sLookupCache.texturesByPath.clear();
+    sLookupCache.rmGeneration = sLookupCache.amGeneration = UINT32_MAX;
+    sLookupRm = nullptr;
+    sLookupAm = nullptr;
+}
+
 static void* LookupResourceRawPointer(uint64_t hash) {
     if (sResLookupMode < 2) {
         return Ship::Context::GetInstance()->GetResourceManager()->GetResourceRawPointer(hash);
@@ -4711,6 +4723,7 @@ void Interpreter::Destroy() {
 
     // Texture cache and loaded textures store references to Resources which need to be unreferenced.
     TextureCacheClear();
+    ReleaseLookupCache();
     mRdp->texture_to_load.raw_tex_metadata.resource = nullptr;
     mRdp->loaded_texture[0].raw_tex_metadata.resource = nullptr;
     mRdp->loaded_texture[1].raw_tex_metadata.resource = nullptr;
@@ -4758,10 +4771,7 @@ void Interpreter::StartFrame() {
         sLookupAm = sLookupRm->GetArchiveManager();
     } else {
         // Not held while unused: the entries keep textures alive.
-        sLookupCache.textures.clear();
-        sLookupCache.rawPointers.clear();
-        sLookupCache.texturesByPath.clear();
-        sLookupCache.rmGeneration = sLookupCache.amGeneration = UINT32_MAX;
+        ReleaseLookupCache();
     }
     mWapi->GetDimensions(&mGfxCurrentWindowDimensions.width, &mGfxCurrentWindowDimensions.height, &mCurWindowPosX,
                          &mCurWindowPosY);
