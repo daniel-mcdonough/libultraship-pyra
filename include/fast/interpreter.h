@@ -223,7 +223,9 @@ extern "C" void (*gBenchSplitHook)(int stage);
 // 32 DrawMenu's menus and windows, 64 the SDL backend's NewFrame, 128 DrawFloatingWindows,
 // 256 HandleMouseCapture and the mouse state manager, 512 the game overlay, 1024 the game framebuffer's
 // quad in the present pass (§8.52: what a display-controller plane would take off the GPU; the window
-// shows only the clear).
+// shows only the clear), 2048 that quad replaced by a 360x640 portrait one with rotated texture
+// coordinates (§8.54: the SGX rotate-copy item F would need on KMS). 4096 is not read by the game:
+// the hardware repo's gc320rot blits while the harness's arm has it.
 extern "C" int gBenchSkipFlat;
 // When set, the renderer calls glFinish before the swap and times it, splitting "the GPU had not
 // finished the frame" from "presenting it took the time". Off by default: glFinish serialises CPU

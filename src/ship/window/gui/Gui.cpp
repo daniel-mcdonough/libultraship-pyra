@@ -774,7 +774,10 @@ void Gui::DrawGame() {
     }
     uintptr_t fb = Ship::Context::GetInstance()->GetWindow()->GetGfxFrameBuffer();
 #ifdef SOH_BENCHMARK
-    if (gBenchSkipFlat & 1024) {
+    // 2048 replaces the quad with the rotate-copy item F would need on KMS (report 08 §8.54): the 640x360
+    // frame into a 360x640 portrait quad, texture coordinates turned 90 degrees. 1024 alone skips it.
+    const bool portrait = (gBenchSkipFlat & 2048) != 0;
+    if ((gBenchSkipFlat & 1024) && !portrait) {
         fb = 0;
     }
 #endif
@@ -789,7 +792,15 @@ void Gui::DrawGame() {
             ImGui::GetWindowDrawList()->AddCallback(PresentStateCallback, reinterpret_cast<void*>(fb));
         }
 #endif
-        ImGui::Image(reinterpret_cast<ImTextureID>(fb), size);
+#ifdef SOH_BENCHMARK
+        if (portrait) {
+            const ImVec2 o = ImGui::GetCursorScreenPos();
+            ImGui::GetWindowDrawList()->AddImageQuad(reinterpret_cast<ImTextureID>(fb), o, ImVec2(o.x + 360, o.y),
+                                                     ImVec2(o.x + 360, o.y + 640), ImVec2(o.x, o.y + 640),
+                                                     ImVec2(0, 1), ImVec2(0, 0), ImVec2(1, 0), ImVec2(1, 1));
+        } else
+#endif
+            ImGui::Image(reinterpret_cast<ImTextureID>(fb), size);
 #ifdef ENABLE_OPENGL
         if (gl) {
             ImGui::GetWindowDrawList()->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
