@@ -1,6 +1,7 @@
 #include <spdlog/spdlog.h>
 #include "ship/utils/StringHelper.h"
 #include "ship/debug/CrashHandler.h"
+#include <csignal>
 #include "ship/Context.h"
 
 #ifdef _WIN32
@@ -16,6 +17,12 @@
 #endif
 
 namespace Ship {
+
+static volatile std::sig_atomic_t sShutdownSignal = 0;
+
+int ShutdownSignalReceived() {
+    return sShutdownSignal;
+}
 
 #define WRITE_VAR_LINE(handler, varName, varValue) \
     handler->AppendStr(varName);                   \
@@ -204,10 +211,17 @@ static void ErrorHandler(int sig, siginfo_t* sigInfo, void* data) {
     exit(1);
 }
 
+// exit() from here ran the static destructors while the game's threads were still using them: on the
+// Pyra it blocked for good destroying the audio thread's condition variable, so a SIGTERM hung the game
+// instead of ending it. Only record the signal; the window's event loop sees it and quits normally,
+// running DeinitOTR and writing the saves. A second signal ends the process at once. (Upstream #1188
+// pushes an SDL_QUIT from here instead; SDL_PushEvent takes the event queue's lock, which is not
+// async-signal-safe, and leaves no way out if the loop is stuck.)
 static void ShutdownHandler(int sig, siginfo_t* sigInfo, void* data) {
-    SDL_Event event;
-    event.type = SDL_QUIT;
-    SDL_PushEvent(&event);
+    if (sShutdownSignal != 0) {
+        _exit(128 + sig);
+    }
+    sShutdownSignal = sig;
 }
 
 #elif _WIN32

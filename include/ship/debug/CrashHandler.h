@@ -28,6 +28,10 @@ namespace Ship {
  */
 typedef void (*CrashHandlerCallback)(char*, size_t*);
 
+// The SIGINT/SIGTERM/SIGQUIT the process received, or 0. The window's event loop polls it and quits the
+// normal way; the signal handler only records it.
+int ShutdownSignalReceived();
+
 /**
  * @brief Installs platform-specific signal / exception handlers to capture crash information.
  *

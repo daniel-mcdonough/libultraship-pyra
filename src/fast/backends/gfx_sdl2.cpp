@@ -14,6 +14,7 @@
 #include "ship/config/ConsoleVariable.h"
 #include "ship/controller/controldeck/ControlDeck.h"
 #include "ship/window/FileDropMgr.h"
+#include "ship/debug/CrashHandler.h"
 #include "fast/backends/gfx_sdl.h"
 
 #ifdef __OpenBSD__
@@ -676,6 +677,9 @@ void GfxWindowBackendSDL2::HandleEvents() {
     }
     while (SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_CONTROLLERDEVICEREMOVED + 1, SDL_LASTEVENT) > 0) {
         HandleSingleEvent(event);
+    }
+    if (Ship::ShutdownSignalReceived() != 0) {
+        Close();
     }
 
     // resync fullscreen state
