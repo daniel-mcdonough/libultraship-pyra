@@ -1,6 +1,7 @@
 #include "ship/config/Config.h"
 
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <filesystem>
 #include <unordered_map>
@@ -10,6 +11,12 @@
 
 #ifdef __APPLE__
 #include "fast/backends/gfx_metal.h"
+#endif
+
+#if !defined(_WIN32) && !defined(__SWITCH__) && !defined(__WIIU__)
+#include <fcntl.h>
+#include <unistd.h>
+#define LUS_CONFIG_FSYNC 1
 #endif
 
 namespace fs = std::filesystem;
@@ -210,10 +217,75 @@ void Config::Reload() {
     } catch (...) { mFlattenedJson = nlohmann::json::object(); }
 }
 
+#ifdef LUS_CONFIG_FSYNC
+// Flushes a file, or a directory's entries, to disk: a rename can otherwise reach the disk before the
+// data it names, and a power cut leaves the new name on an empty file.
+static bool SyncPath(const fs::path& path, bool directory) {
+    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | (directory ? O_DIRECTORY : 0));
+    if (fd < 0) {
+        return false;
+    }
+    const bool ok = ::fsync(fd) == 0;
+    ::close(fd);
+    return ok;
+}
+#endif
+
+// The config used to be streamed straight over the live file, so a failed or misdirected write (a
+// full disk, a power cut, or a stray close() handing this stream another file's descriptor, as SoH's
+// report 10 found on the Pyra) destroyed it. Now: write a temp file, read it back, and only rename it
+// over the real one if the bytes match. Switch and Wii U keep the direct write; rename is unreliable
+// on their toolchains.
 void Config::Save() {
-    std::ofstream file(mPath);
     mNestedJson = mFlattenedJson.unflatten();
-    file << mNestedJson.dump(4);
+    const std::string expected = mNestedJson.dump(4);
+#if defined(__SWITCH__) || defined(__WIIU__)
+    std::ofstream file(mPath);
+    file << expected;
+#else
+    const fs::path finalPath(mPath);
+    fs::path tempPath = finalPath;
+    tempPath += ".temp";
+    std::error_code ec;
+    {
+        std::ofstream output(tempPath, std::ios::binary | std::ios::trunc);
+        output << expected;
+        output.close();
+        if (!output) {
+            SPDLOG_ERROR("Config: writing {} failed; {} left as it was", tempPath.string(), mPath);
+            fs::remove(tempPath, ec);
+            return;
+        }
+    }
+    std::ifstream input(tempPath, std::ios::binary);
+    const std::string actual((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    input.close();
+    if (actual != expected) {
+        SPDLOG_ERROR("Config: {} read back wrong (wrote {} bytes, got {}); {} left as it was", tempPath.string(),
+                     expected.size(), actual.size(), mPath);
+        fs::remove(tempPath, ec);
+        return;
+    }
+#ifdef LUS_CONFIG_FSYNC
+    if (!SyncPath(tempPath, false)) {
+        SPDLOG_ERROR("Config: fsync of {} failed; {} left as it was", tempPath.string(), mPath);
+        fs::remove(tempPath, ec);
+        return;
+    }
+#endif
+    fs::rename(tempPath, finalPath, ec);
+    if (ec) {
+        SPDLOG_ERROR("Config: renaming {} into place failed: {}", tempPath.string(), ec.message());
+        fs::remove(tempPath, ec);
+        return;
+    }
+#ifdef LUS_CONFIG_FSYNC
+    const fs::path dir = finalPath.has_parent_path() ? finalPath.parent_path() : fs::path(".");
+    if (!SyncPath(dir, true)) {
+        SPDLOG_WARN("Config: fsync of {} failed after the rename", dir.string());
+    }
+#endif
+#endif
 }
 
 template <typename T> std::vector<T> Config::GetArray(const std::string& key) {
