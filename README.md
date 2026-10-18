@@ -1,3 +1,31 @@
+# libultraship for the DragonBox Pyra
+
+This is an unofficial fork of [libultraship](https://github.com/Kenix3/libultraship), used as the
+engine library of [Shipwright-pyra](https://github.com/daniel-mcdonough/Shipwright-pyra), the Ship of
+Harkinian port to the DragonBox Pyra. It targets the Pyra's PowerVR SGX544 with OpenGL ES 2.0 and is
+not meant for other platforms. Work on it from that repository, where it is a submodule; branch
+`feature/gles2-pyra`. Please do not report problems with this fork upstream.
+
+What differs from upstream:
+
+- **GLES2 backend** (`USE_OPENGLES2`): GLSL ES 1.00 shaders, the ImGui ES2 backend, and workarounds
+  for missing `gl_FragDepth` and the SGX's varying budget.
+- **GL render thread** (`gSettings.RenderThread`, default 2 on GLES2): `GfxRenderingAPI` calls are
+  recorded and replayed on a second core.
+- **Lean renderer paths**, each a `gSettings.Lean*` setting and on by default. They cover
+  client-side vertex arrays, a per-frame resource lookup cache, arena-allocated interpolation,
+  draw grouping by program and texture, CVar reads without string building, and a blend-free
+  present pass.
+- **Bilinear texture filtering by default.** It applies live, without a restart.
+- **Safe config writes.** `Config::Save` writes a temp file, reads it back, fsyncs and renames.
+  Before, it streamed over the live `shipofharkinian.json`.
+- **A clean quit on SIGTERM.**
+- **SDL gamepad touchpad zone, wedge and axis mappings.**
+
+Measurements and reasoning are in Shipwright-pyra's README and `docs/pyra/`.
+
+---
+
 # libultraship
 libultraship (LUS) is a library meant to provide reimplementations of libultra (n64 sdk) functions that run on modern hardware.
 
