@@ -1,9 +1,11 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include <unordered_map>
 #include <set>
+#include <utility>
 #include "imconfig.h"
 
 namespace Fast {
