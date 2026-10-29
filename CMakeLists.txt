@@ -25,7 +25,7 @@ set(ADDITIONAL_LIB_INCLUDES "")
 
 # ========= Configuration Options =========
 option(INCLUDE_MPQ_SUPPORT "Enable StormLib and MPQ archive support" OFF)
-option(GBI_UCODE "Specify the GBI ucode version" F3DEX_GBI_2)
+set(GBI_UCODE F3DEX_GBI_2 CACHE STRING "Specify the GBI ucode version")
 
 # Declared here rather than in src/, because the per-platform dependency
 # scripts included below branch on USE_OPENGLES to pick ImGui's GL backend.
