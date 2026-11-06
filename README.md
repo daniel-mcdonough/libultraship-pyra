@@ -1,3 +1,34 @@
+# libultraship for the DragonBox Pyra
+
+This is an unofficial fork of [libultraship](https://github.com/Kenix3/libultraship). This branch,
+`feature/gles2-2s2h`, is the engine library of the 2 Ship 2 Harkinian port to the DragonBox Pyra: the
+pyra commits of `feature/gles2-pyra` (the Ship of Harkinian port's branch) replayed onto the
+libultraship commit that 2 Ship 2 Harkinian pins. It targets the Pyra's PowerVR SGX544 with OpenGL
+ES 2.0 and is not meant for other platforms. Work on it from the port's repository, where it is a
+submodule. Please do not report problems with this fork upstream.
+
+What differs from upstream:
+
+- **GLES2 backend** (`USE_OPENGLES2`): GLSL ES 1.00 shaders, the ImGui ES2 backend, and workarounds
+  for missing `gl_FragDepth` and the SGX's varying budget.
+- **GL render thread** (`gSettings.RenderThread`, default 2 on GLES2): `GfxRenderingAPI` calls are
+  recorded and replayed on a second core.
+- **Lean renderer paths**, each a `gSettings.Lean*` setting and on by default. They cover
+  client-side vertex arrays, a per-frame resource lookup cache, arena-allocated interpolation,
+  draw grouping by program and texture, CVar reads without string building, and a blend-free
+  present pass.
+- **Bilinear texture filtering by default.** It applies live, without a restart.
+- **Safe config writes.** `Config::Save` writes a temp file, reads it back, fsyncs and renames.
+  Before, it streamed over the live config file.
+- **A clean quit on SIGINT, SIGTERM and SIGQUIT**, through a flag polled by the event loop.
+- **SDL gamepad touchpad zone, wedge and axis mappings.**
+
+The optimisations were measured on Ship of Harkinian. For 2 Ship 2 Harkinian each one is a
+hypothesis until the port's A/B harness measures it; the port's `docs/pyra/` has the status.
+
+---
+
+
 # libultraship
 libultraship (LUS) is a library meant to provide reimplementations of libultra (n64 sdk) functions that run on modern hardware.
 
