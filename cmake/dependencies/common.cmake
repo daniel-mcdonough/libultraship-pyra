@@ -52,8 +52,12 @@ endif()
 
 #=================== STB ===================
 set(STB_DIR ${CMAKE_BINARY_DIR}/_deps/stb)
-file(DOWNLOAD "https://github.com/nothings/stb/raw/0bc88af4de5fb022db643c2d8e549a0927749354/stb_image.h" "${STB_DIR}/stb_image.h")
-file(WRITE "${STB_DIR}/stb_impl.c" "#define STB_IMAGE_IMPLEMENTATION\n#include \"stb_image.h\"")
+# EXPECTED_HASH makes CMake skip the download when the file is already there and
+# matches. Unhashed, every configure re-fetched it and the new mtime recompiled
+# everything that includes it. file(CONFIGURE) likewise writes only on change.
+file(DOWNLOAD "https://github.com/nothings/stb/raw/0bc88af4de5fb022db643c2d8e549a0927749354/stb_image.h" "${STB_DIR}/stb_image.h"
+    EXPECTED_HASH SHA256=c54b15a689e6a1f32c75e2ec23afa442e3e0e37e894b73c1974d08679b20dd5c)
+file(CONFIGURE OUTPUT "${STB_DIR}/stb_impl.c" CONTENT "#define STB_IMAGE_IMPLEMENTATION\n#include \"stb_image.h\"\n")
 
 add_library(stb STATIC)
 
