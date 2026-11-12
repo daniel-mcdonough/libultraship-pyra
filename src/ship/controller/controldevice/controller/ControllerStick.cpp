@@ -276,10 +276,13 @@ bool ControllerStick::AddOrEditAxisDirectionMappingFromRawPress(Direction direct
     std::shared_ptr<ControllerAxisDirectionMapping> mapping = nullptr;
 
     mUseEventInputToCreateNewMapping = true;
-    if (mKeyboardScancodeForNewMapping != LUS_KB_UNKNOWN) {
+    // Controller first, as in ControllerButton: the Pyra d-pad and buttons also send keys in the same instant.
+    mapping = AxisDirectionMappingFactory::CreateAxisDirectionMappingFromSDLInput(mPortIndex, mStickIndex, direction);
+
+    if (mapping == nullptr && mKeyboardScancodeForNewMapping != LUS_KB_UNKNOWN) {
         mapping = std::make_shared<KeyboardKeyToAxisDirectionMapping>(mPortIndex, mStickIndex, direction,
                                                                       mKeyboardScancodeForNewMapping);
-    } else if (!Context::GetInstance()->GetWindow()->GetGui()->IsMouseOverAnyGuiItem() &&
+    } else if (mapping == nullptr && !Context::GetInstance()->GetWindow()->GetGui()->IsMouseOverAnyGuiItem() &&
                Context::GetInstance()->GetWindow()->GetGui()->IsMouseOverActivePopup()) {
         if (mMouseButtonForNewMapping != LUS_MOUSE_BTN_UNKNOWN) {
             mapping = std::make_shared<MouseButtonToAxisDirectionMapping>(mPortIndex, mStickIndex, direction,
@@ -288,10 +291,6 @@ bool ControllerStick::AddOrEditAxisDirectionMappingFromRawPress(Direction direct
             mapping = AxisDirectionMappingFactory::CreateAxisDirectionMappingFromMouseWheelInput(
                 mPortIndex, mStickIndex, direction);
         }
-    }
-    if (mapping == nullptr) {
-        mapping =
-            AxisDirectionMappingFactory::CreateAxisDirectionMappingFromSDLInput(mPortIndex, mStickIndex, direction);
     }
 
     if (mapping == nullptr) {

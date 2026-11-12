@@ -150,21 +150,21 @@ bool ControllerButton::AddOrEditButtonMappingFromRawPress(CONTROLLERBUTTONS_T bi
     std::shared_ptr<ControllerButtonMapping> mapping = nullptr;
 
     mUseEventInputToCreateNewMapping = true;
-    if (mKeyboardScancodeForNewMapping != LUS_KB_UNKNOWN) {
+    // Controller first: on the Pyra every game button also sends a key (Home, End, PgUp, ...) in the
+    // same instant, so checking the keyboard first meant a gamepad button could never be bound.
+    mapping = ButtonMappingFactory::CreateButtonMappingFromSDLInput(mPortIndex, bitmask);
+
+    if (mapping == nullptr && mKeyboardScancodeForNewMapping != LUS_KB_UNKNOWN) {
         mapping = std::make_shared<KeyboardKeyToButtonMapping>(mPortIndex, bitmask, mKeyboardScancodeForNewMapping);
     }
 
-    else if (!Context::GetInstance()->GetWindow()->GetGui()->IsMouseOverAnyGuiItem() &&
+    else if (mapping == nullptr && !Context::GetInstance()->GetWindow()->GetGui()->IsMouseOverAnyGuiItem() &&
              Context::GetInstance()->GetWindow()->GetGui()->IsMouseOverActivePopup()) {
         if (mMouseButtonForNewMapping != LUS_MOUSE_BTN_UNKNOWN) {
             mapping = std::make_shared<MouseButtonToButtonMapping>(mPortIndex, bitmask, mMouseButtonForNewMapping);
         } else {
             mapping = ButtonMappingFactory::CreateButtonMappingFromMouseWheelInput(mPortIndex, bitmask);
         }
-    }
-
-    if (mapping == nullptr) {
-        mapping = ButtonMappingFactory::CreateButtonMappingFromSDLInput(mPortIndex, bitmask);
     }
 
     if (mapping == nullptr) {

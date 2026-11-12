@@ -26,6 +26,16 @@ void MouseStateManager::CursorVisibilityTimeoutTick() {
     bool mouseMoved = abs(mousePos.x - sPrevMousePos.x) > 0 || abs(mousePos.y - sPrevMousePos.y) > 0;
     sPrevMousePos = mousePos;
 
+    // On the Pyra the nubs move the mouse and the gamepad sticks at once, so moving a nub in play would
+    // keep waking the cursor. Without the menu there is nothing to point at; keep it hidden.
+    if (wnd->GetGui() != nullptr && !wnd->GetGui()->GetMenuOrMenubarVisible()) {
+        if (mCursorVisibleTicksCounter != -1) {
+            wnd->SetCursorVisibility(false);
+            mCursorVisibleTicksCounter = -1;
+        }
+        return;
+    }
+
     if (mouseMoved) {
         wnd->SetCursorVisibility(true);
         ResetCursorVisibilityTimer();
