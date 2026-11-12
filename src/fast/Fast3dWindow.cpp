@@ -328,6 +328,10 @@ void Fast3dWindow::SetMouseCapture(bool capture) {
     mWindowManagerApi->SetMouseCapture(capture);
 }
 
+void Fast3dWindow::SetMouseConfined(bool confined) {
+    mWindowManagerApi->SetMouseConfined(confined);
+}
+
 bool Fast3dWindow::IsMouseCaptured() {
     return mWindowManagerApi->IsMouseCaptured();
 }

@@ -29,6 +29,7 @@ class MouseStateManager {
   private:
     bool mAutoCaptureMouse = false;
     bool mForceCursorVisibility = false;
+    bool mMouseConfined = false;
 
     uint32_t mCursorVisibleTicks = 180;
     uint32_t mCursorVisibleTicksCounter = mCursorVisibleTicks;

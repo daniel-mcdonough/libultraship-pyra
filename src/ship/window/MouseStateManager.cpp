@@ -18,6 +18,16 @@ void MouseStateManager::CursorVisibilityTimeoutTick() {
     static Coords sPrevMousePos;
 
     std::shared_ptr<Window> wnd = Context::GetInstance()->GetWindow();
+
+    // The Pyra's right nub sends mouse clicks and scrolls. In windowed mode they went to whatever window
+    // was under the pointer, so play kept switching windows. Hold the pointer in the game window while
+    // the menu is closed; opening the menu lets it go.
+    const bool menuOpen = wnd->GetGui() == nullptr || wnd->GetGui()->GetMenuOrMenubarVisible();
+    if (mMouseConfined == menuOpen) {
+        mMouseConfined = !menuOpen;
+        wnd->SetMouseConfined(mMouseConfined);
+    }
+
     if (ShouldForceCursorVisibility() || wnd->IsMouseCaptured()) {
         return;
     }
@@ -28,7 +38,7 @@ void MouseStateManager::CursorVisibilityTimeoutTick() {
 
     // On the Pyra the nubs move the mouse and the gamepad sticks at once, so moving a nub in play would
     // keep waking the cursor. Without the menu there is nothing to point at; keep it hidden.
-    if (wnd->GetGui() != nullptr && !wnd->GetGui()->GetMenuOrMenubarVisible()) {
+    if (!menuOpen) {
         if (mCursorVisibleTicksCounter != -1) {
             wnd->SetCursorVisibility(false);
             mCursorVisibleTicksCounter = -1;

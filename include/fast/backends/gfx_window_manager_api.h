@@ -23,6 +23,9 @@ class GfxWindowBackend {
     virtual bool GetMouseState(uint32_t btn) = 0;
     virtual void SetMouseCapture(bool capture) = 0;
     virtual bool IsMouseCaptured() = 0;
+    // Keep the pointer, and every click and scroll, inside the game window. No-op where unsupported.
+    virtual void SetMouseConfined(bool confined) {
+    }
     virtual void GetDimensions(uint32_t* width, uint32_t* height, int32_t* posX, int32_t* posY) = 0;
     virtual void HandleEvents() = 0;
     virtual bool IsFrameReady() = 0;

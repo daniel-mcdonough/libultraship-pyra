@@ -24,6 +24,7 @@ class GfxWindowBackendSDL2 final : public GfxWindowBackend {
     bool GetMouseState(uint32_t btn) override;
     void SetMouseCapture(bool capture) override;
     bool IsMouseCaptured() override;
+    void SetMouseConfined(bool confined) override;
     void GetDimensions(uint32_t* width, uint32_t* height, int32_t* posX, int32_t* posY) override;
     void HandleEvents() override;
     bool IsFrameReady() override;

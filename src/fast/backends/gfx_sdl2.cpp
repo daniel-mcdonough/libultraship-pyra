@@ -509,6 +509,10 @@ void GfxWindowBackendSDL2::SetMouseCapture(bool capture) {
     SDL_SetWindowMouseRect(mWnd, capture ? &mCursorClip : NULL);
 }
 
+void GfxWindowBackendSDL2::SetMouseConfined(bool confined) {
+    SDL_SetWindowGrab(mWnd, static_cast<SDL_bool>(confined));
+}
+
 bool GfxWindowBackendSDL2::IsMouseCaptured() {
     return (SDL_GetRelativeMouseMode() == SDL_TRUE);
 }
