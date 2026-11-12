@@ -282,6 +282,12 @@ bool Gui::SupportsViewports() {
     return false;
 #endif
 
+#ifdef USE_OPENGLES2
+    // On the Pyra a window dragged out of the game became its own SDL window that the SGX driver never
+    // drew: it showed in the taskbar but stayed invisible, and the menu went with it. Keep ImGui inside.
+    return false;
+#endif
+
     switch (Context::GetInstance()->GetWindow()->GetWindowBackend()) {
         case WindowBackend::FAST3D_DXGI_DX11:
             return true;
