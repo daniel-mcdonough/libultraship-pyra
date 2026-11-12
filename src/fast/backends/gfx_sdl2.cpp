@@ -29,6 +29,10 @@
 #define GL_GLEXT_PROTOTYPES 1
 #include <SDL2/SDL_opengles2.h>
 #endif
+#if defined(USE_OPENGLES2) && defined(__linux__)
+#include <stdlib.h>
+#include <unistd.h>
+#endif
 
 #include "ship/window/gui/Gui.h"
 
@@ -318,6 +322,17 @@ void GfxWindowBackendSDL2::Init(const char* gameName, const char* gfxApiName, bo
 #if SDL_VERSION_ATLEAST(2, 24, 0)
     /* fix DPI scaling issues on Windows */
     SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
+#endif
+
+#if defined(USE_OPENGLES2) && defined(__linux__)
+    // The Pyra's GPU is only reachable through EGL and the SGX driver's own libGLESv2, which SDL finds
+    // neither of by default: X11 picks GLX, and the EGL path loads the system libGLESv2.so.2. Point it
+    // at the driver when it is installed, as if the variables were set; a value already set wins.
+    static const char* sgxGles = "/opt/omap5-sgx-ddk-um-linux/lib/libGLESv2.so.1";
+    if (access(sgxGles, R_OK) == 0) {
+        setenv("SDL_VIDEO_X11_FORCE_EGL", "1", 0);
+        setenv("SDL_VIDEO_GL_DRIVER", sgxGles, 0);
+    }
 #endif
 
     SDL_Init(SDL_INIT_VIDEO);
